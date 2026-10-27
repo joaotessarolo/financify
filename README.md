@@ -3,9 +3,32 @@
 Aplicação de finanças pessoais com entrada de receitas e despesas por formulário,
 texto natural e áudio.
 
-Este repositório começa deliberadamente sem código. As primeiras decisões e os
-limites do produto estão registrados em [`docs/architecture.md`](docs/architecture.md)
-e nos ADRs em [`docs/adr`](docs/adr).
+As primeiras decisões e os limites do produto estão registrados em
+[`docs/architecture.md`](docs/architecture.md) e nos ADRs em [`docs/adr`](docs/adr).
+
+## Estado atual
+
+- API Django em `apps/api`.
+- PostgreSQL local definido em `infra/compose.yaml`.
+- App `users` criado; o model será implementado como exercício.
+- Django REST Framework instalado; endpoints ainda não foram implementados.
+
+## Desenvolvimento da API
+
+Pré-requisitos: Python 3.15, `uv` e Docker.
+
+```bash
+cp apps/api/.env.example apps/api/.env
+docker compose -f infra/compose.yaml up -d --wait
+cd apps/api
+uv sync
+uv run python manage.py migrate
+uv run python manage.py test
+uv run python manage.py runserver
+```
+
+O `.env.example` contém somente valores adequados ao desenvolvimento local. Em
+qualquer outro ambiente, a chave secreta e as credenciais devem ser substituídas.
 
 ## Escopo inicial
 
