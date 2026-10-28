@@ -57,7 +57,7 @@ class UserAdmin(DjangoUserAdmin):
             None,
             {
                 "classes": ("wide",),
-                "fields": ("email", "password1", "password2"),
+                "fields": ("email", "usable_password", "password1", "password2"),
             },
         ),
     )
