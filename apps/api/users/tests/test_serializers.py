@@ -3,7 +3,7 @@ import uuid
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from ..serializers import UserRegistrationSerializer
+from ..serializers import UserLoginSerializer, UserRegistrationSerializer
 
 
 class UserRegistrationSerializerTests(TestCase):
@@ -158,3 +158,140 @@ class UserRegistrationSerializerTests(TestCase):
         self.assertEqual(serializer.data["last_name"], "Silva")
         self.assertEqual(serializer.data["currency"], "USD")
         self.assertEqual(serializer.data["timezone"], "UTC")
+
+
+class UserLoginSerializerTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user_model = get_user_model()
+        cls.email = "user@example.com"
+        cls.password = "StrongPassword!123"
+        cls.user = cls.user_model.objects.create_user(
+            email=cls.email,
+            password=cls.password,
+        )
+
+    def test_valid_credentials_are_accepted(self):
+        serializer = UserLoginSerializer(
+            data={
+                "email": self.email,
+                "password": self.password,
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_authenticated_user_is_in_validated_data(self):
+        serializer = UserLoginSerializer(
+            data={
+                "email": self.email,
+                "password": self.password,
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data["user"], self.user)
+
+    def test_email_with_different_casing_authenticates(self):
+        serializer = UserLoginSerializer(
+            data={
+                "email": "USER@EXAMPLE.COM",
+                "password": self.password,
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data["user"], self.user)
+
+    def test_incorrect_password_is_rejected(self):
+        serializer = UserLoginSerializer(
+            data={
+                "email": self.email,
+                "password": "WrongPassword!123",
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("non_field_errors", serializer.errors)
+
+    def test_nonexistent_email_is_rejected(self):
+        serializer = UserLoginSerializer(
+            data={
+                "email": "unknown@example.com",
+                "password": self.password,
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("non_field_errors", serializer.errors)
+
+    def test_inactive_user_is_rejected(self):
+        inactive_user = self.user_model.objects.create_user(
+            email="inactive@example.com",
+            password=self.password,
+            is_active=False,
+        )
+        serializer = UserLoginSerializer(
+            data={
+                "email": inactive_user.email,
+                "password": self.password,
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("non_field_errors", serializer.errors)
+
+    def test_missing_email_is_rejected(self):
+        serializer = UserLoginSerializer(
+            data={
+                "password": self.password,
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("email", serializer.errors)
+        self.assertEqual(serializer.errors["email"][0].code, "required")
+
+    def test_missing_password_is_rejected(self):
+        serializer = UserLoginSerializer(
+            data={
+                "email": self.email,
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("password", serializer.errors)
+        self.assertEqual(serializer.errors["password"][0].code, "required")
+
+    def test_incorrect_password_and_nonexistent_email_return_same_error_message(self):
+        wrong_password_serializer = UserLoginSerializer(
+            data={
+                "email": self.email,
+                "password": "WrongPassword!123",
+            }
+        )
+        unknown_email_serializer = UserLoginSerializer(
+            data={
+                "email": "unknown@example.com",
+                "password": self.password,
+            }
+        )
+
+        self.assertFalse(wrong_password_serializer.is_valid())
+        self.assertFalse(unknown_email_serializer.is_valid())
+        self.assertEqual(
+            wrong_password_serializer.errors["non_field_errors"],
+            unknown_email_serializer.errors["non_field_errors"],
+        )
+
+    def test_password_is_not_in_serialized_output(self):
+        serializer = UserLoginSerializer(
+            data={
+                "email": self.email,
+                "password": self.password,
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertNotIn("password", serializer.data)
+        self.assertNotIn("email", serializer.data)

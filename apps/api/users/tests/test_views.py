@@ -1,7 +1,9 @@
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APITestCase
+from rest_framework.test import APIClient, APITestCase
 
 
 class UserRegistrationViewTests(APITestCase):
@@ -69,3 +71,132 @@ class UserRegistrationViewTests(APITestCase):
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
+class UserAuthenticationViewsTests(APITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user_model = get_user_model()
+        cls.email = "user@example.com"
+        cls.password = "StrongPassword!123"
+        cls.user = cls.user_model.objects.create_user(
+            email=cls.email,
+            password=cls.password,
+        )
+        cls.csrf_url = reverse("auth:csrf")
+        cls.login_url = reverse("auth:login")
+        cls.logout_url = reverse("auth:logout")
+
+    def setUp(self):
+        self.csrf_client = APIClient(enforce_csrf_checks=True)
+
+    def _get_csrf_token(self):
+        response = self.csrf_client.get(self.csrf_url)
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertIn("csrftoken", response.cookies)
+        return response.cookies["csrftoken"].value
+
+    def test_csrf_endpoint_sets_csrf_cookie(self):
+        response = self.csrf_client.get(self.csrf_url)
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertIn("csrftoken", response.cookies)
+        self.assertTrue(response.cookies["csrftoken"].value)
+
+    def test_login_without_csrf_token_is_rejected(self):
+        response = self.csrf_client.post(
+            self.login_url,
+            {"email": self.email, "password": self.password},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertNotIn("sessionid", response.cookies)
+
+    def test_login_with_csrf_token_creates_httponly_session(self):
+        csrf_token = self._get_csrf_token()
+
+        response = self.csrf_client.post(
+            self.login_url,
+            {"email": self.email, "password": self.password},
+            format="json",
+            headers={"X-CSRFToken": csrf_token},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertIn("sessionid", response.cookies)
+        self.assertTrue(response.cookies["sessionid"]["httponly"])
+        self.assertEqual(
+            self.csrf_client.session.get("_auth_user_id"),
+            str(self.user.id),
+        )
+
+    def test_login_with_invalid_credentials_returns_400(self):
+        csrf_token = self._get_csrf_token()
+
+        response = self.csrf_client.post(
+            self.login_url,
+            {"email": self.email, "password": "WrongPassword!123"},
+            format="json",
+            headers={"X-CSRFToken": csrf_token},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertNotIn("sessionid", response.cookies)
+
+    def test_logout_clears_session_and_blocks_subsequent_protected_requests(self):
+        csrf_token = self._get_csrf_token()
+        login_response = self.csrf_client.post(
+            self.login_url,
+            {"email": self.email, "password": self.password},
+            format="json",
+            headers={"X-CSRFToken": csrf_token},
+        )
+        self.assertEqual(login_response.status_code, status.HTTP_204_NO_CONTENT)
+
+        # login() rotates the CSRF token, so read the updated cookie value
+        post_login_csrf_token = self.csrf_client.cookies["csrftoken"].value
+
+        logout_response = self.csrf_client.post(
+            self.logout_url,
+            headers={"X-CSRFToken": post_login_csrf_token},
+        )
+
+        self.assertEqual(logout_response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertIsNone(self.csrf_client.session.get("_auth_user_id"))
+
+        second_logout_response = self.csrf_client.post(
+            self.logout_url,
+            headers={"X-CSRFToken": post_login_csrf_token},
+        )
+        self.assertEqual(
+            second_logout_response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_protected_endpoint_recognizes_authenticated_user(self):
+        unauthenticated_response = self.csrf_client.post(self.logout_url)
+        self.assertEqual(
+            unauthenticated_response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        csrf_token = self._get_csrf_token()
+        self.csrf_client.post(
+            self.login_url,
+            {"email": self.email, "password": self.password},
+            format="json",
+            headers={"X-CSRFToken": csrf_token},
+        )
+        post_login_csrf_token = self.csrf_client.cookies["csrftoken"].value
+
+        with patch("users.views.logout") as mock_logout:
+            authenticated_response = self.csrf_client.post(
+                self.logout_url,
+                headers={"X-CSRFToken": post_login_csrf_token},
+            )
+
+        self.assertEqual(authenticated_response.status_code, status.HTTP_204_NO_CONTENT)
+        mock_logout.assert_called_once()
+        authenticated_request = mock_logout.call_args.args[0]
+        self.assertEqual(authenticated_request.user, self.user)
