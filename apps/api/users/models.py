@@ -12,6 +12,7 @@ class UserManager(BaseUserManager):
         - Uses email instead of username
         - Creates superusers
     """
+
     use_in_migrations = True
 
     def _create_user(self, email, password=None, **extra_fields):
@@ -54,7 +55,7 @@ class User(AbstractUser):
     objects = UserManager()
 
     class Meta(AbstractUser.Meta):
-        constraints = [
+        constraints = [  # noqa: RUF012
             models.UniqueConstraint(
                 Lower("email"),
                 name="users_user_email_ci_unique",
