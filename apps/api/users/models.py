@@ -53,7 +53,7 @@ class User(AbstractUser):
 
     objects = UserManager()
 
-    class Meta:
+    class Meta(AbstractUser.Meta):
         constraints = [
             models.UniqueConstraint(
                 Lower("email"),

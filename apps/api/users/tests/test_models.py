@@ -1,7 +1,7 @@
 import uuid
 
 from django.contrib.auth import get_user_model
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 
 
@@ -130,7 +130,8 @@ class UserManagerTests(TestCase):
         )
 
         with self.assertRaises(IntegrityError):
-            self.user_model.objects.create(
-                email="USER@EXAMPLE.COM",
-                password=self.password,
-            )
+            with transaction.atomic():
+                self.user_model.objects.create(
+                    email="USER@EXAMPLE.COM",
+                    password=self.password,
+                )
