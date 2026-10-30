@@ -6,12 +6,26 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .serializers import UserLoginSerializer, UserRegistrationSerializer
+from .serializers import (
+    UserLoginSerializer,
+    UserProfileSerializer,
+    UserRegistrationSerializer,
+)
 
 
 class UserRegistrationView(generics.CreateAPIView):
     serializer_class = UserRegistrationSerializer
     permission_classes = [AllowAny]
+
+
+class UserProfileView(generics.RetrieveUpdateAPIView):
+    serializer_class = UserProfileSerializer
+    http_method_names = ("get", "patch", "head", "options")
+
+    def get_object(self):
+        user = self.request.user
+        self.check_object_permissions(self.request, user)
+        return user
 
 
 @method_decorator(ensure_csrf_cookie, name="dispatch")
