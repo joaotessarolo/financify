@@ -1,6 +1,7 @@
 import uuid
 
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError
 from django.test import TestCase
 
 
@@ -15,6 +16,7 @@ class UserManagerTests(TestCase):
         - Create superuser.
         - Rejection of superuser with is_staff=False.
         - Rejection of superuser with is_superuser=False.
+        - Database rejects duplicate email regardless of letter case.
     """
 
     def setUp(self):
@@ -63,7 +65,7 @@ class UserManagerTests(TestCase):
     def test_create_user_email_normalization(self):
         """Test user email normalization."""
         user = self.user_model.objects.create_user(
-            email="user@EXAMPLE.COM",
+            email="USER@EXAMPLE.COM",
             password=self.password,
         )
 
@@ -118,4 +120,17 @@ class UserManagerTests(TestCase):
                 email="admin@example.com",
                 password="admin-password-123",
                 is_superuser=False,
+            )
+
+    def test_database_rejects_duplicate_email_case_insensitive(self):
+        """Test database constraint rejects duplicate email with different casing."""
+        self.user_model.objects.create_user(
+            email="user@example.com",
+            password=self.password,
+        )
+
+        with self.assertRaises(IntegrityError):
+            self.user_model.objects.create(
+                email="USER@EXAMPLE.COM",
+                password=self.password,
             )
