@@ -55,6 +55,7 @@ dependencies = [
     { name = "django-environ" },
     { name = "djangorestframework" },
     { name = "psycopg", extra = ["binary"] },
+    { name = "tzdata" },
 ]
 
 [package.metadata]
@@ -63,6 +64,7 @@ requires-dist = [
     { name = "django-environ", specifier = ">=0.14.0" },
     { name = "djangorestframework", specifier = ">=3.18.3" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3,<4" },
+    { name = "tzdata", specifier = ">=2026.5" },
 ]
 
 [[package]]

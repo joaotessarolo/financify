@@ -5,6 +5,14 @@ from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.db.models.functions import Lower
 
+from .validators import validate_timezone
+
+
+class Currency(models.TextChoices):
+    BRL = "BRL", "Brazilian Real"
+    USD = "USD", "US Dollar"
+    EUR = "EUR", "Euro"
+
 
 class UserManager(BaseUserManager):
     """
@@ -46,8 +54,16 @@ class User(AbstractUser):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     username = None
     email = models.EmailField(unique=True)
-    currency = models.CharField(max_length=3, default="BRL")
-    timezone = models.CharField(max_length=50, default="America/Sao_Paulo")
+    currency = models.CharField(
+        max_length=3,
+        choices=Currency.choices,
+        default=Currency.BRL,
+    )
+    timezone = models.CharField(
+        max_length=50,
+        default="America/Sao_Paulo",
+        validators=[validate_timezone],
+    )
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []
@@ -59,6 +75,10 @@ class User(AbstractUser):
             models.UniqueConstraint(
                 Lower("email"),
                 name="users_user_email_ci_unique",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(currency__in=Currency.values),
+                name="users_user_currency_supported",
             ),
         ]
 

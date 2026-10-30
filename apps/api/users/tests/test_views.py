@@ -381,3 +381,33 @@ class UserProfileViewTests(APITestCase):
         other_user_url = f"/api/v1/users/{self.other_user.id}/"
         other_response = self.client.get(other_user_url)
         self.assertEqual(other_response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_patch_with_invalid_currency_returns_400_and_leaves_db_unchanged(self):
+        self.client.force_login(self.user)
+
+        response = self.client.patch(
+            self.url,
+            {"currency": "XYZ"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("currency", response.data)
+        self.assertEqual(response.data["currency"][0].code, "invalid_choice")
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.currency, "BRL")
+
+    def test_patch_with_invalid_timezone_returns_400_and_leaves_db_unchanged(self):
+        self.client.force_login(self.user)
+
+        response = self.client.patch(
+            self.url,
+            {"timezone": "Not/A_Timezone"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("timezone", response.data)
+        self.assertEqual(response.data["timezone"][0].code, "invalid_timezone")
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.timezone, "America/Sao_Paulo")

@@ -1,6 +1,7 @@
 import uuid
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 
@@ -135,3 +136,39 @@ class UserManagerTests(TestCase):
                     email="USER@EXAMPLE.COM",
                     password=self.password,
                 )
+
+    def test_database_rejects_unsupported_currency(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                self.user_model.objects.create_user(
+                    email=self.email,
+                    password=self.password,
+                    currency="XYZ",
+                )
+
+    def test_full_clean_rejects_invalid_timezone(self):
+        user = self.user_model.objects.create_user(
+            email=self.email,
+            password=self.password,
+        )
+        user.timezone = "Not/A_Real_Timezone"
+
+        with self.assertRaises(ValidationError) as ctx:
+            user.full_clean()
+
+        self.assertIn("timezone", ctx.exception.error_dict)
+        self.assertEqual(
+            ctx.exception.error_dict["timezone"][0].code,
+            "invalid_timezone",
+        )
+
+    def test_full_clean_accepts_valid_timezones(self):
+        user = self.user_model.objects.create_user(
+            email=self.email,
+            password=self.password,
+        )
+
+        for valid_tz in ("UTC", "America/Sao_Paulo"):
+            with self.subTest(timezone=valid_tz):
+                user.timezone = valid_tz
+                user.full_clean()

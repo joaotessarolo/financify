@@ -7,4 +7,5 @@ dependencies = [
     "django-environ>=0.14.0",
     "djangorestframework>=3.18.3",
     "psycopg[binary]>=3.3,<4",
+    "tzdata>=2026.5",
 ]

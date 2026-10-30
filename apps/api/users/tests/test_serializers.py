@@ -143,7 +143,7 @@ class UserRegistrationSerializerTests(TestCase):
             "first_name": "João",
             "last_name": "Silva",
             "currency": "USD",
-            "timezone": "UTC",
+            "timezone": "Europe/Lisbon",
         }
         serializer = UserRegistrationSerializer(data=payload)
 
@@ -153,11 +153,33 @@ class UserRegistrationSerializerTests(TestCase):
         self.assertEqual(user.first_name, "João")
         self.assertEqual(user.last_name, "Silva")
         self.assertEqual(user.currency, "USD")
-        self.assertEqual(user.timezone, "UTC")
+        self.assertEqual(user.timezone, "Europe/Lisbon")
         self.assertEqual(serializer.data["first_name"], "João")
         self.assertEqual(serializer.data["last_name"], "Silva")
         self.assertEqual(serializer.data["currency"], "USD")
-        self.assertEqual(serializer.data["timezone"], "UTC")
+        self.assertEqual(serializer.data["timezone"], "Europe/Lisbon")
+
+    def test_unsupported_currency_is_rejected(self):
+        payload = {
+            **self.valid_payload,
+            "currency": "XYZ",
+        }
+        serializer = UserRegistrationSerializer(data=payload)
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("currency", serializer.errors)
+        self.assertEqual(serializer.errors["currency"][0].code, "invalid_choice")
+
+    def test_invalid_timezone_is_rejected(self):
+        payload = {
+            **self.valid_payload,
+            "timezone": "Not/A_Timezone",
+        }
+        serializer = UserRegistrationSerializer(data=payload)
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("timezone", serializer.errors)
+        self.assertEqual(serializer.errors["timezone"][0].code, "invalid_timezone")
 
 
 class UserLoginSerializerTests(TestCase):
