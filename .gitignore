@@ -29,3 +29,6 @@ coverage/
 media/
 staticfiles/
 
+# Personal notes
+docs/study-checklist.md
+
