@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 import uuid
 
 from django.contrib.auth import get_user_model
@@ -9,11 +10,13 @@ from django.test import TestCase
 from django.utils import timezone
 
 from common.money import Currency
+from ledger.models import Account, AccountType, EntrySide
 
 from ..models import (
     Conversation,
     ConversationChannel,
     ConversationStatus,
+    DraftEntry,
     Message,
     MessageDirection,
     MessageStatus,
@@ -592,3 +595,224 @@ class TransactionDraftModelTests(TestCase):
                             expires_at=self.expires_at,
                             resolved_at=None,
                         )
+
+
+class DraftEntryModelTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user_model = get_user_model()
+        cls.user = cls.user_model.objects.create_user(
+            email="user@example.com",
+            password="StrongPassword!123",
+        )
+        cls.account = Account.objects.create(
+            user=cls.user,
+            name="Groceries",
+            account_type=AccountType.EXPENSE,
+            currency=Currency.BRL,
+        )
+        cls.conversation = Conversation.objects.create(
+            user=cls.user,
+            channel=ConversationChannel.TELEGRAM,
+        )
+        cls.source_message = Message.objects.create(
+            conversation=cls.conversation,
+            direction=MessageDirection.INBOUND,
+            message_type=MessageType.TEXT,
+            content="Groceries 45.00 BRL",
+        )
+        cls.occurred_at = timezone.now()
+        cls.expires_at = cls.occurred_at + timedelta(hours=24)
+        cls.draft = TransactionDraft.objects.create(
+            user=cls.user,
+            source_message=cls.source_message,
+            description="Groceries purchase",
+            currency=Currency.BRL,
+            occurred_at=cls.occurred_at,
+            expires_at=cls.expires_at,
+        )
+
+    def test_create_valid_draft_entry(self):
+        draft_entry = DraftEntry.objects.create(
+            draft=self.draft,
+            account=self.account,
+            side=EntrySide.DEBIT,
+            amount=Decimal("45.75"),
+            memo="Supermarket",
+        )
+
+        self.assertIsInstance(draft_entry.id, uuid.UUID)
+        self.assertEqual(draft_entry.draft, self.draft)
+        self.assertEqual(draft_entry.account, self.account)
+        self.assertEqual(draft_entry.side, EntrySide.DEBIT)
+        self.assertEqual(draft_entry.amount, Decimal("45.75"))
+        self.assertEqual(draft_entry.memo, "Supermarket")
+        self.assertIsNotNone(draft_entry.created_at)
+        self.assertIsNotNone(draft_entry.updated_at)
+        draft_entry.full_clean()
+
+    def test_draft_entry_memo_defaults_to_empty_string(self):
+        draft_entry = DraftEntry.objects.create(
+            draft=self.draft,
+            account=self.account,
+            side=EntrySide.DEBIT,
+            amount=Decimal("45.00"),
+        )
+
+        self.assertEqual(draft_entry.memo, "")
+
+    def test_reverse_relationships_on_draft_and_account(self):
+        draft_entry = DraftEntry.objects.create(
+            draft=self.draft,
+            account=self.account,
+            side=EntrySide.DEBIT,
+            amount=Decimal("45.00"),
+        )
+
+        self.assertIn(draft_entry, self.draft.entries.all())
+        self.assertIn(draft_entry, self.account.draft_entries.all())
+
+    def test_str_returns_useful_representation(self):
+        draft_entry = DraftEntry.objects.create(
+            draft=self.draft,
+            account=self.account,
+            side=EntrySide.DEBIT,
+            amount=Decimal("45.00"),
+        )
+
+        self.assertEqual(str(draft_entry), "Debit 45.00 (Groceries)")
+
+    def test_deleting_draft_cascades_to_draft_entries(self):
+        draft = TransactionDraft.objects.create(
+            user=self.user,
+            source_message=self.source_message,
+            description="Temporary draft",
+            currency=Currency.BRL,
+            occurred_at=self.occurred_at,
+            expires_at=self.expires_at,
+        )
+        draft_entry = DraftEntry.objects.create(
+            draft=draft,
+            account=self.account,
+            side=EntrySide.DEBIT,
+            amount=Decimal("30.00"),
+        )
+
+        draft.delete()
+
+        self.assertFalse(DraftEntry.objects.filter(id=draft_entry.id).exists())
+
+    def test_deleting_account_with_draft_entry_raises_restricted_error(self):
+        restricted_account = Account.objects.create(
+            user=self.user,
+            name="Restricted Account",
+            account_type=AccountType.ASSET,
+            currency=Currency.BRL,
+        )
+        DraftEntry.objects.create(
+            draft=self.draft,
+            account=restricted_account,
+            side=EntrySide.CREDIT,
+            amount=Decimal("45.00"),
+        )
+
+        with self.assertRaises(RestrictedError):
+            restricted_account.delete()
+
+    def test_deleting_user_cascades_to_drafts_and_draft_entries(self):
+        cascade_user = self.user_model.objects.create_user(
+            email="cascade-draft-entry@example.com",
+            password="StrongPassword!123",
+        )
+        account = Account.objects.create(
+            user=cascade_user,
+            name="Checking",
+            account_type=AccountType.ASSET,
+            currency=Currency.BRL,
+        )
+        conversation = Conversation.objects.create(
+            user=cascade_user,
+            channel=ConversationChannel.TELEGRAM,
+        )
+        message = Message.objects.create(
+            conversation=conversation,
+            direction=MessageDirection.INBOUND,
+            message_type=MessageType.TEXT,
+            content="Lunch 35 BRL",
+        )
+        draft = TransactionDraft.objects.create(
+            user=cascade_user,
+            source_message=message,
+            description="Lunch",
+            currency=Currency.BRL,
+            occurred_at=self.occurred_at,
+            expires_at=self.expires_at,
+        )
+        draft_entry = DraftEntry.objects.create(
+            draft=draft,
+            account=account,
+            side=EntrySide.CREDIT,
+            amount=Decimal("35.00"),
+        )
+
+        cascade_user.delete()
+
+        self.assertFalse(Account.objects.filter(id=account.id).exists())
+        self.assertFalse(TransactionDraft.objects.filter(id=draft.id).exists())
+        self.assertFalse(DraftEntry.objects.filter(id=draft_entry.id).exists())
+
+    def test_full_clean_rejects_invalid_side(self):
+        draft_entry = DraftEntry(
+            draft=self.draft,
+            account=self.account,
+            side="INVALID",
+            amount=Decimal("10.00"),
+        )
+
+        with self.assertRaises(ValidationError) as ctx:
+            draft_entry.full_clean()
+
+        self.assertIn("side", ctx.exception.error_dict)
+
+    def test_full_clean_rejects_zero_or_negative_amount(self):
+        for invalid_amount in (Decimal("0.00"), Decimal("-10.00")):
+            with self.subTest(amount=invalid_amount):
+                draft_entry = DraftEntry(
+                    draft=self.draft,
+                    account=self.account,
+                    side=EntrySide.DEBIT,
+                    amount=invalid_amount,
+                )
+                with self.assertRaises(ValidationError) as ctx:
+                    draft_entry.full_clean()
+                self.assertIn("amount", ctx.exception.error_dict)
+
+    def test_database_rejects_invalid_side(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                DraftEntry.objects.create(
+                    draft=self.draft,
+                    account=self.account,
+                    side="INVALID",
+                    amount=Decimal("10.00"),
+                )
+
+    def test_database_rejects_zero_amount(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                DraftEntry.objects.create(
+                    draft=self.draft,
+                    account=self.account,
+                    side=EntrySide.DEBIT,
+                    amount=Decimal("0.00"),
+                )
+
+    def test_database_rejects_negative_amount(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                DraftEntry.objects.create(
+                    draft=self.draft,
+                    account=self.account,
+                    side=EntrySide.DEBIT,
+                    amount=Decimal("-10.00"),
+                )
