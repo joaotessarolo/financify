@@ -186,6 +186,13 @@ class TransactionDraft(models.Model):
         on_delete=models.RESTRICT,
         related_name="transaction_drafts",
     )
+    transaction = models.OneToOneField(
+        "ledger.Transaction",
+        on_delete=models.RESTRICT,
+        related_name="source_draft",
+        null=True,
+        blank=True,
+    )
     description = models.CharField(
         max_length=255,
     )
@@ -237,6 +244,23 @@ class TransactionDraft(models.Model):
                     )
                 ),
                 name="conversations_transactiondraft_resolved_at_consistency",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        status=TransactionDraftStatus.CONFIRMED,
+                        transaction__isnull=False,
+                    )
+                    | models.Q(
+                        status__in=[
+                            TransactionDraftStatus.PENDING,
+                            TransactionDraftStatus.REJECTED,
+                            TransactionDraftStatus.EXPIRED,
+                        ],
+                        transaction__isnull=True,
+                    )
+                ),
+                name="conversations_transactiondraft_transaction_consistency",
             ),
         ]
 
