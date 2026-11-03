@@ -151,3 +151,13 @@ REST_FRAMEWORK = {
         "rest_framework.permissions.IsAuthenticated",
     ],
 }
+
+TELEGRAM_BOT_USERNAME = env(
+    "TELEGRAM_BOT_USERNAME",
+    default="",
+)
+
+TELEGRAM_LINK_TOKEN_TTL_SECONDS = env.int(
+    "TELEGRAM_LINK_TOKEN_TTL_SECONDS",
+    default=600,
+)
