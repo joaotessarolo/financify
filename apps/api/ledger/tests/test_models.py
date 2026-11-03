@@ -1,8 +1,10 @@
+from decimal import Decimal
 import uuid
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import ProtectedError
 from django.test import TestCase
 from django.utils import timezone
 
@@ -11,6 +13,8 @@ from common.money import Currency
 from ..models import (
     Account,
     AccountType,
+    Entry,
+    EntrySide,
     Transaction,
     TransactionSource,
     TransactionStatus,
@@ -331,4 +335,166 @@ class TransactionModelTests(TestCase):
                     occurred_at=self.occurred_at,
                     status=TransactionStatus.VOIDED,
                     posted_at=None,
+                )
+
+
+class EntryModelTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user_model = get_user_model()
+        cls.user = cls.user_model.objects.create_user(
+            email="user@example.com",
+            password="StrongPassword!123",
+        )
+        cls.account = Account.objects.create(
+            user=cls.user,
+            name="Nubank Checking",
+            account_type=AccountType.ASSET,
+            currency=Currency.BRL,
+        )
+        cls.transaction = Transaction.objects.create(
+            user=cls.user,
+            description="Grocery shopping",
+            currency=Currency.BRL,
+            occurred_at=timezone.now(),
+        )
+
+    def test_create_valid_entry(self):
+        entry = Entry.objects.create(
+            transaction=self.transaction,
+            account=self.account,
+            side=EntrySide.CREDIT,
+            amount=Decimal("150.50"),
+            memo="Weekly groceries",
+        )
+
+        self.assertIsInstance(entry.id, uuid.UUID)
+        self.assertEqual(entry.transaction, self.transaction)
+        self.assertEqual(entry.account, self.account)
+        self.assertEqual(entry.side, EntrySide.CREDIT)
+        self.assertEqual(entry.amount, Decimal("150.50"))
+        self.assertEqual(entry.memo, "Weekly groceries")
+        self.assertIsNotNone(entry.created_at)
+        self.assertIsNotNone(entry.updated_at)
+
+    def test_entry_memo_defaults_to_empty_string(self):
+        entry = Entry.objects.create(
+            transaction=self.transaction,
+            account=self.account,
+            side=EntrySide.DEBIT,
+            amount=Decimal("50.00"),
+        )
+
+        self.assertEqual(entry.memo, "")
+
+    def test_reverse_relationships_on_transaction_and_account(self):
+        entry = Entry.objects.create(
+            transaction=self.transaction,
+            account=self.account,
+            side=EntrySide.DEBIT,
+            amount=Decimal("100.00"),
+        )
+
+        self.assertIn(entry, self.transaction.entries.all())
+        self.assertIn(entry, self.account.entries.all())
+
+    def test_str_returns_useful_representation(self):
+        entry = Entry.objects.create(
+            transaction=self.transaction,
+            account=self.account,
+            side=EntrySide.DEBIT,
+            amount=Decimal("100.00"),
+        )
+
+        self.assertEqual(str(entry), "DEBIT 100.00 (Nubank Checking)")
+
+    def test_deleting_transaction_cascades_to_entries(self):
+        tx = Transaction.objects.create(
+            user=self.user,
+            description="Temporary transaction",
+            currency=Currency.BRL,
+            occurred_at=timezone.now(),
+        )
+        entry = Entry.objects.create(
+            transaction=tx,
+            account=self.account,
+            side=EntrySide.DEBIT,
+            amount=Decimal("25.00"),
+        )
+
+        tx.delete()
+
+        self.assertFalse(Entry.objects.filter(id=entry.id).exists())
+
+    def test_deleting_account_with_entries_raises_protected_error(self):
+        protected_account = Account.objects.create(
+            user=self.user,
+            name="Protected Account",
+            account_type=AccountType.ASSET,
+            currency=Currency.BRL,
+        )
+        Entry.objects.create(
+            transaction=self.transaction,
+            account=protected_account,
+            side=EntrySide.DEBIT,
+            amount=Decimal("25.00"),
+        )
+
+        with self.assertRaises(ProtectedError):
+            protected_account.delete()
+
+    def test_full_clean_rejects_invalid_side(self):
+        entry = Entry(
+            transaction=self.transaction,
+            account=self.account,
+            side="INVALID_SIDE",
+            amount=Decimal("10.00"),
+        )
+
+        with self.assertRaises(ValidationError) as ctx:
+            entry.full_clean()
+
+        self.assertIn("side", ctx.exception.error_dict)
+
+    def test_full_clean_rejects_zero_or_negative_amount(self):
+        for invalid_amount in (Decimal("0.00"), Decimal("-10.00")):
+            with self.subTest(amount=invalid_amount):
+                entry = Entry(
+                    transaction=self.transaction,
+                    account=self.account,
+                    side=EntrySide.DEBIT,
+                    amount=invalid_amount,
+                )
+                with self.assertRaises(ValidationError) as ctx:
+                    entry.full_clean()
+                self.assertIn("amount", ctx.exception.error_dict)
+
+    def test_database_rejects_invalid_side(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Entry.objects.create(
+                    transaction=self.transaction,
+                    account=self.account,
+                    side="INVALID",
+                    amount=Decimal("10.00"),
+                )
+
+    def test_database_rejects_zero_amount(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Entry.objects.create(
+                    transaction=self.transaction,
+                    account=self.account,
+                    side=EntrySide.DEBIT,
+                    amount=Decimal("0.00"),
+                )
+
+    def test_database_rejects_negative_amount(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Entry.objects.create(
+                    transaction=self.transaction,
+                    account=self.account,
+                    side=EntrySide.DEBIT,
+                    amount=Decimal("-10.00"),
                 )

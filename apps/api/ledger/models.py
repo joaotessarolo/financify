@@ -1,6 +1,8 @@
+from decimal import Decimal
 import uuid
 
 from django.conf import settings
+from django.core.validators import MinValueValidator
 from django.db import models
 
 from common.money import Currency
@@ -154,3 +156,57 @@ class Transaction(models.Model):
 
     def __str__(self):
         return f"{self.description} ({self.status})"
+
+
+class Entry(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+    transaction = models.ForeignKey(
+        Transaction,
+        on_delete=models.CASCADE,
+        related_name="entries",
+    )
+    account = models.ForeignKey(
+        Account,
+        on_delete=models.PROTECT,
+        related_name="entries",
+    )
+    side = models.CharField(
+        max_length=10,
+        choices=EntrySide.choices,
+    )
+    amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01"))],
+    )
+    memo = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    class Meta:
+        verbose_name_plural = "entries"
+        constraints = [  # noqa: RUF012
+            models.CheckConstraint(
+                condition=models.Q(side__in=EntrySide.values),
+                name="ledger_entry_side_supported",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=Decimal("0.00")),
+                name="ledger_entry_amount_positive",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.side} {self.amount} ({self.account.name})"
