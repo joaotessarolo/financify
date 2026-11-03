@@ -1,19 +1,19 @@
 # Financify
 
 Financify is a personal finance platform for recording income, expenses, and
-transfers through structured forms, natural-language conversations, and voice
-messages.
+transfers through a Telegram conversation and managing financial data through a
+web application.
 
 The repository is organized as a monorepo. The backend is a modular Django
-application, the web client will use Next.js, and shared TypeScript packages can
-be consumed by future clients.
+application, the web client will use Next.js, and Telegram provides the
+conversational interface for text and voice messages.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
     Web[Next.js Web Client]
-    Mobile[Mobile Client]
+    Telegram[Telegram Bot]
 
     subgraph Backend["Django API"]
         Users[Users and Authentication]
@@ -23,7 +23,7 @@ flowchart LR
     end
 
     Web -->|HTTPS / JSON| Backend
-    Mobile -->|HTTPS / JSON| Backend
+    Telegram -->|HTTPS webhook| Backend
 
     Backend --> PostgreSQL[(PostgreSQL)]
     Backend -->|Enqueue jobs| Redis[(Redis)]
@@ -65,6 +65,7 @@ transaction.
 | Python dependency management | uv |
 | Local infrastructure | Docker Compose |
 | Web client | React, TypeScript, Next.js |
+| Conversational client | Telegram Bot API |
 | Background processing | Celery and Redis |
 | File storage | S3-compatible object storage |
 | API contract | REST and OpenAPI |
@@ -75,8 +76,7 @@ transaction.
 financify/
 ├── apps/
 │   ├── api/                 # Django API
-│   ├── web/                 # Next.js web client
-│   └── mobile/              # Mobile client
+│   └── web/                 # Next.js web client
 ├── packages/                # Shared client packages
 ├── infra/
 │   └── compose.yaml         # Local PostgreSQL service

@@ -1,108 +1,153 @@
-# Arquitetura inicial
+# System architecture
 
-## Objetivo
+## Purpose
 
-Construir um produto pequeno e utilizável enquanto revisamos os fundamentos de
-Python, Django, React, TypeScript e Next.js. A arquitetura deve permitir evolução,
-mas não antecipar escala ou equipes que ainda não existem.
+Financify is a personal finance product with two primary interfaces:
 
-## Contexto
+- a Telegram bot for conversational entry through text and voice messages;
+- a Next.js web application for account setup, review, reporting, and financial management.
 
-- Um desenvolvedor trabalhando continuamente no produto.
-- Web primeiro; mobile será considerado posteriormente.
-- Cada recurso financeiro pertence diretamente a um usuário.
-- Entradas poderão ser feitas manualmente, por texto ou por áudio.
-- Monetização e volume ainda são desconhecidos.
+The backend starts as a modular Django monolith. Domain boundaries remain explicit without introducing distributed-system complexity before it is needed.
 
-## Visão do sistema
+## System view
 
-```text
-Browser / Next.js
-       |
-       | HTTP + JSON
-       v
-Django REST API ---------------- PostgreSQL
-       |
-       | agenda trabalhos demorados
-       v
-Fila / Worker ------------------ Object storage
-       |
-       +---- transcrição
-       +---- interpretação estruturada
-       +---- notificações de conclusão
+```mermaid
+flowchart LR
+    User[User]
+    Telegram[Telegram Bot]
+    Web[Next.js Web Application]
+
+    subgraph Django["Django modular monolith"]
+        TelegramAdapter[Telegram adapter]
+        WebAPI[REST API]
+        Identity[Identity]
+        Conversations[Conversations]
+        Assistant[Assistant]
+        Ledger[Ledger]
+    end
+
+    User --> Telegram
+    User --> Web
+    Telegram -->|HTTPS webhook| TelegramAdapter
+    Web -->|HTTPS and JSON| WebAPI
+
+    TelegramAdapter --> Identity
+    TelegramAdapter --> Conversations
+    WebAPI --> Identity
+    WebAPI --> Ledger
+    Conversations -->|enqueue| Queue[(Redis)]
+    Queue --> Worker[Background worker]
+    Worker --> Speech[Speech-to-text provider]
+    Worker --> Assistant
+    Worker --> Storage[(Object storage)]
+    Assistant -->|validated proposal| Draft[Transaction draft]
+    Draft -->|explicit confirmation| Ledger
+
+    Django --> Database[(PostgreSQL)]
 ```
 
-O sistema será um monólito modular. API web e worker executam o mesmo código
-Django, embora possam ser processos e containers separados.
+The Telegram bot and the web application are delivery mechanisms. Neither owns financial rules. Both reach the ledger through application services in the Django backend.
 
-## Contextos do backend
+## Backend modules
 
 ### Identity
 
-Autenticação, perfil e preferências do usuário, incluindo moeda e timezone.
+Owns authentication, the user profile, currency and timezone preferences, and external identities. A Telegram identity is linked to a Financify user by the numeric Telegram user ID, never by the mutable Telegram username.
+
+Account linking uses a short-lived, single-use token created by the authenticated web application and consumed through a Telegram `/start` deep link.
 
 ### Ledger
 
-Contas, transações, lançamentos, transferências e consistência financeira. Este é
-o núcleo do produto e não deve depender do módulo de IA.
+Owns accounts, transactions, entries, transfers, posting, and financial invariants. It is independent of Telegram and AI providers.
 
-### Classification
+A posting service validates the complete transaction atomically, including:
 
-Categorias, tags e regras determinísticas de classificação.
+- every account and transaction belongs to the same user;
+- every entry uses the transaction currency;
+- debit and credit totals are equal;
+- amounts are positive;
+- a transaction cannot be posted twice.
 
 ### Conversations
 
-Conversas, mensagens, anexos de áudio e estado visível de processamento.
+Owns conversations, inbound and outbound messages, voice attachments, processing state, and the association between a message and a transaction draft. Channel and message format are modeled separately:
+
+- channel examples: `TELEGRAM` and, if introduced later, `WEB`;
+- message type examples: `TEXT`, `VOICE`, and `SYSTEM`.
 
 ### Assistant
 
-Transcrição, identificação de intenção e extração estruturada. Produz rascunhos;
-nunca persiste uma transação confirmada sem ação explícita do usuário.
+Owns transcription orchestration, intent recognition, and structured extraction. Provider SDKs remain behind application interfaces. AI output is untrusted and can only create or update a transaction draft.
 
-## Regras arquiteturais
+### Telegram adapter
 
-1. Valores monetários usam decimal e uma moeda explícita.
-2. Toda consulta de domínio é limitada ao usuário autenticado.
-3. Transferência não é receita nem despesa.
-4. Requisições e tarefas repetidas devem ser idempotentes.
-5. Chamadas a modelos de IA ficam atrás de interfaces da aplicação.
-6. A saída da IA é dado não confiável e sempre passa por validação.
-7. Áudio e chamadas externas são processados fora da requisição HTTP principal.
-8. Código de domínio não importa SDKs de fornecedores de IA.
-9. Uma otimização só é introduzida após medição.
+Owns Telegram-specific protocol concerns:
 
-## Fluxo de áudio
+- webhook validation and update parsing;
+- update idempotency using `update_id`;
+- commands and callback queries;
+- inline confirmation buttons;
+- downloading voice messages by `file_id`;
+- translating application responses into Telegram messages.
+
+It does not create ledger entries directly. Production uses an HTTPS webhook; local development may use long polling.
+
+## Conversational transaction flow
 
 ```text
-mensagem de áudio
-  -> upload e criação da mensagem
-  -> tarefa de transcrição
-  -> tarefa de interpretação
-  -> validação do resultado
-  -> TransactionDraft
-  -> confirmação ou correção pelo usuário
-  -> serviço do Ledger
-  -> Transaction
+Telegram text or voice message
+  -> validate and persist the Telegram update
+  -> persist the conversation message
+  -> enqueue slow or external processing
+  -> transcribe voice when applicable
+  -> extract and validate structured data
+  -> create a TransactionDraft
+  -> ask the user to confirm, edit, or cancel
+  -> explicit confirmation
+  -> call the Ledger posting service
+  -> atomically create and post Transaction and Entries
+  -> send the result to Telegram
 ```
 
-Estados mínimos da mensagem: `uploaded`, `processing`, `completed` e `failed`.
-Estados mínimos do rascunho: `pending`, `confirmed`, `rejected` e `expired`.
+The webhook acknowledges accepted updates quickly. Transcription, model calls, and retries run outside the webhook request.
 
-## Contrato entre frontend e backend
+## Source, channel, and message type
 
-A API será REST e terá especificação OpenAPI. O frontend não duplicará
-manualmente os tipos dos recursos: futuramente será gerado um cliente TypeScript
-a partir da especificação.
+These concepts must not be conflated:
 
-O MVP pode consultar o estado do processamento por polling. SSE poderá substituir
-o polling quando streaming e feedback progressivo justificarem a complexidade.
+| Concept | Meaning | Examples |
+| --- | --- | --- |
+| Transaction source | How the financial record was produced | `MANUAL`, `ASSISTANT`, `IMPORT`, `API` |
+| Conversation channel | Where the interaction occurred | `TELEGRAM`, potentially `WEB` |
+| Message type | The format of a conversation message | `TEXT`, `VOICE`, `SYSTEM` |
 
-## Caminho de evolução
+A voice message sent to Telegram and interpreted by the assistant therefore has an `ASSISTANT` transaction source, a `TELEGRAM` channel, and a `VOICE` message type.
 
-- O mobile entra como novo consumidor da mesma API.
-- Propriedade direta por usuário pode migrar para um workspace quando houver
-  compartilhamento.
-- Um módulo só vira serviço separado por necessidade operacional comprovada.
-- Rust será considerado apenas para um processamento local que apareça em
-  profiling como gargalo relevante.
+## Security and reliability rules
 
+1. Telegram is initially supported only in private chats.
+2. Bot tokens and webhook secrets are provided through environment variables.
+3. Webhook requests must validate Telegram's secret-token header.
+4. Telegram `update_id` and confirmation callbacks are processed idempotently.
+5. Account-linking tokens are random, short-lived, single-use, and stored safely.
+6. Every domain query and command is scoped to the linked Financify user.
+7. AI output is validated before it becomes a draft and again before posting.
+8. Voice files are temporary artifacts governed by an explicit retention policy.
+9. Logs must not contain bot tokens, linking tokens, or raw sensitive payloads.
+10. External requests have timeouts, bounded retries, and observable failures.
+
+## Data and infrastructure
+
+- PostgreSQL is the source of truth.
+- Redis and background workers handle asynchronous processing.
+- S3-compatible object storage holds voice files only when persistence is needed.
+- Money uses decimal values and explicit ISO 4217 currency codes.
+- Timestamps are stored as timezone-aware UTC values and displayed using the user's timezone.
+
+## Evolution rules
+
+- The web application remains the management and reporting interface.
+- A web chat is a future product decision, not part of the Telegram feature.
+- Telegram-specific code depends on application services, not ledger models directly.
+- A module becomes a separate service only when independent scaling, deployment, reliability, or ownership provides measurable value.
+- Rust is introduced only when profiling identifies a local CPU-bound bottleneck that it can materially improve.
