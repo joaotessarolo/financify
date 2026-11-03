@@ -1,10 +1,14 @@
+from datetime import timedelta
 import uuid
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import RestrictedError
 from django.test import TestCase
 from django.utils import timezone
+
+from common.money import Currency
 
 from ..models import (
     Conversation,
@@ -14,6 +18,8 @@ from ..models import (
     MessageDirection,
     MessageStatus,
     MessageType,
+    TransactionDraft,
+    TransactionDraftStatus,
 )
 
 
@@ -336,4 +342,253 @@ class MessageModelTests(TestCase):
                             message_type=MessageType.TEXT,
                             status=status,
                             processed_at=None,
+                        )
+
+
+class TransactionDraftModelTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user_model = get_user_model()
+        cls.user = cls.user_model.objects.create_user(
+            email="user@example.com",
+            password="StrongPassword!123",
+        )
+        cls.conversation = Conversation.objects.create(
+            user=cls.user,
+            channel=ConversationChannel.TELEGRAM,
+        )
+        cls.source_message = Message.objects.create(
+            conversation=cls.conversation,
+            direction=MessageDirection.INBOUND,
+            message_type=MessageType.TEXT,
+            content="Lunch 45 BRL",
+        )
+        cls.occurred_at = timezone.now()
+        cls.expires_at = cls.occurred_at + timedelta(hours=24)
+
+    def test_create_valid_pending_transaction_draft_with_defaults(self):
+        draft = TransactionDraft.objects.create(
+            user=self.user,
+            source_message=self.source_message,
+            description="Lunch at restaurant",
+            currency=Currency.BRL,
+            occurred_at=self.occurred_at,
+            expires_at=self.expires_at,
+        )
+
+        self.assertIsInstance(draft.id, uuid.UUID)
+        self.assertEqual(draft.user, self.user)
+        self.assertEqual(draft.source_message, self.source_message)
+        self.assertEqual(draft.description, "Lunch at restaurant")
+        self.assertEqual(draft.currency, Currency.BRL)
+        self.assertEqual(draft.occurred_at, self.occurred_at)
+        self.assertEqual(draft.status, TransactionDraftStatus.PENDING)
+        self.assertEqual(draft.expires_at, self.expires_at)
+        self.assertIsNone(draft.resolved_at)
+        self.assertIsNotNone(draft.created_at)
+        self.assertIsNotNone(draft.updated_at)
+        draft.full_clean()
+
+    def test_reverse_relationships_on_user_and_source_message(self):
+        draft = TransactionDraft.objects.create(
+            user=self.user,
+            source_message=self.source_message,
+            description="Coffee",
+            currency=Currency.BRL,
+            occurred_at=self.occurred_at,
+            expires_at=self.expires_at,
+        )
+
+        self.assertIn(draft, self.user.transaction_drafts.all())
+        self.assertIn(draft, self.source_message.transaction_drafts.all())
+
+    def test_deleting_source_message_with_draft_raises_restricted_error(self):
+        restricted_message = Message.objects.create(
+            conversation=self.conversation,
+            direction=MessageDirection.INBOUND,
+            message_type=MessageType.TEXT,
+            content="Restricted message",
+        )
+        TransactionDraft.objects.create(
+            user=self.user,
+            source_message=restricted_message,
+            description="Restricted draft",
+            currency=Currency.BRL,
+            occurred_at=self.occurred_at,
+            expires_at=self.expires_at,
+        )
+
+        with self.assertRaises(RestrictedError):
+            restricted_message.delete()
+
+    def test_deleting_user_cascades_to_conversation_message_and_draft(self):
+        cascade_user = self.user_model.objects.create_user(
+            email="cascade@example.com",
+            password="StrongPassword!123",
+        )
+        conversation = Conversation.objects.create(
+            user=cascade_user,
+            channel=ConversationChannel.TELEGRAM,
+        )
+        message = Message.objects.create(
+            conversation=conversation,
+            direction=MessageDirection.INBOUND,
+            message_type=MessageType.TEXT,
+            content="Dinner 80 BRL",
+        )
+        draft = TransactionDraft.objects.create(
+            user=cascade_user,
+            source_message=message,
+            description="Dinner",
+            currency=Currency.BRL,
+            occurred_at=self.occurred_at,
+            expires_at=self.expires_at,
+        )
+
+        cascade_user.delete()
+
+        self.assertFalse(
+            Conversation.objects.filter(id=conversation.id).exists()
+        )
+        self.assertFalse(Message.objects.filter(id=message.id).exists())
+        self.assertFalse(TransactionDraft.objects.filter(id=draft.id).exists())
+
+    def test_str_returns_useful_representation(self):
+        draft = TransactionDraft.objects.create(
+            user=self.user,
+            source_message=self.source_message,
+            description="Lunch at restaurant",
+            currency=Currency.BRL,
+            occurred_at=self.occurred_at,
+            expires_at=self.expires_at,
+        )
+
+        self.assertEqual(str(draft), "Lunch at restaurant (Pending)")
+
+    def test_terminal_statuses_with_resolved_at_are_valid(self):
+        resolved_at = timezone.now()
+        terminal_statuses = (
+            TransactionDraftStatus.CONFIRMED,
+            TransactionDraftStatus.REJECTED,
+            TransactionDraftStatus.EXPIRED,
+        )
+
+        for status in terminal_statuses:
+            with self.subTest(status=status):
+                draft = TransactionDraft.objects.create(
+                    user=self.user,
+                    source_message=self.source_message,
+                    description=f"Draft {status}",
+                    currency=Currency.USD,
+                    occurred_at=self.occurred_at,
+                    status=status,
+                    expires_at=self.expires_at,
+                    resolved_at=resolved_at,
+                )
+                draft.full_clean()
+                self.assertEqual(draft.status, status)
+                self.assertEqual(draft.currency, Currency.USD)
+                self.assertEqual(draft.resolved_at, resolved_at)
+
+    def test_full_clean_rejects_invalid_currency_and_status(self):
+        for field, value in (
+            ("currency", "XYZ"),
+            ("status", "INVALID"),
+        ):
+            with self.subTest(field=field):
+                kwargs = {
+                    "user": self.user,
+                    "source_message": self.source_message,
+                    "description": "Invalid draft",
+                    "currency": Currency.BRL,
+                    "occurred_at": self.occurred_at,
+                    "expires_at": self.expires_at,
+                    field: value,
+                }
+                draft = TransactionDraft(**kwargs)
+                with self.assertRaises(ValidationError) as ctx:
+                    draft.full_clean()
+                self.assertIn(field, ctx.exception.error_dict)
+
+    def test_database_rejects_invalid_currency(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                TransactionDraft.objects.create(
+                    user=self.user,
+                    source_message=self.source_message,
+                    description="Invalid Currency",
+                    currency="XYZ",
+                    occurred_at=self.occurred_at,
+                    expires_at=self.expires_at,
+                )
+
+    def test_database_rejects_invalid_status(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                TransactionDraft.objects.create(
+                    user=self.user,
+                    source_message=self.source_message,
+                    description="Invalid Status",
+                    currency=Currency.BRL,
+                    occurred_at=self.occurred_at,
+                    status="INVALID",
+                    expires_at=self.expires_at,
+                )
+
+    def test_full_clean_rejects_inconsistent_status_and_resolved_at(self):
+        now = timezone.now()
+        inconsistent_cases = (
+            (TransactionDraftStatus.PENDING, now),
+            (TransactionDraftStatus.CONFIRMED, None),
+            (TransactionDraftStatus.REJECTED, None),
+            (TransactionDraftStatus.EXPIRED, None),
+        )
+
+        for status, resolved_at in inconsistent_cases:
+            with self.subTest(status=status, resolved_at=resolved_at):
+                draft = TransactionDraft(
+                    user=self.user,
+                    source_message=self.source_message,
+                    description="Inconsistent Draft",
+                    currency=Currency.BRL,
+                    occurred_at=self.occurred_at,
+                    status=status,
+                    expires_at=self.expires_at,
+                    resolved_at=resolved_at,
+                )
+                with self.assertRaises(ValidationError):
+                    draft.full_clean()
+
+    def test_database_rejects_pending_with_resolved_at(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                TransactionDraft.objects.create(
+                    user=self.user,
+                    source_message=self.source_message,
+                    description="Inconsistent Pending",
+                    currency=Currency.BRL,
+                    occurred_at=self.occurred_at,
+                    status=TransactionDraftStatus.PENDING,
+                    expires_at=self.expires_at,
+                    resolved_at=timezone.now(),
+                )
+
+    def test_database_rejects_terminal_status_without_resolved_at(self):
+        for status in (
+            TransactionDraftStatus.CONFIRMED,
+            TransactionDraftStatus.REJECTED,
+            TransactionDraftStatus.EXPIRED,
+        ):
+            with self.subTest(status=status):
+                with self.assertRaises(IntegrityError):
+                    with transaction.atomic():
+                        TransactionDraft.objects.create(
+                            user=self.user,
+                            source_message=self.source_message,
+                            description="Inconsistent Terminal",
+                            currency=Currency.BRL,
+                            occurred_at=self.occurred_at,
+                            status=status,
+                            expires_at=self.expires_at,
+                            resolved_at=None,
                         )
