@@ -208,12 +208,12 @@ class TransactionModelTests(TestCase):
             currency=Currency.BRL,
             occurred_at=self.occurred_at,
             status=TransactionStatus.POSTED,
-            source=TransactionSource.CHAT,
+            source=TransactionSource.ASSISTANT,
             posted_at=posted_at,
         )
 
         self.assertEqual(tx.status, TransactionStatus.POSTED)
-        self.assertEqual(tx.source, TransactionSource.CHAT)
+        self.assertEqual(tx.source, TransactionSource.ASSISTANT)
         self.assertEqual(tx.posted_at, posted_at)
 
     def test_create_valid_voided_transaction_with_posted_at(self):

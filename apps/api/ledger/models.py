@@ -24,9 +24,9 @@ class TransactionStatus(models.TextChoices):
 
 class TransactionSource(models.TextChoices):
     MANUAL = "MANUAL", "Manual"
-    CHAT = "CHAT", "Chat"
-    AUDIO = "AUDIO", "Audio"
+    ASSISTANT = "ASSISTANT", "Assistant"
     IMPORT = "IMPORT", "Import"
+    API = "API", "API"
 
 
 class EntrySide(models.TextChoices):
