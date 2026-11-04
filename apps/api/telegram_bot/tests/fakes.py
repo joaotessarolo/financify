@@ -7,6 +7,7 @@ class FakeTelegramClient:
     def __init__(self, *, error: TelegramClientError | None = None):
         self.sent_messages: list[dict] = []
         self.answered_callbacks: list[dict] = []
+        self.webhook_configurations: list[dict] = []
         self._error = error
         self._next_message_id = 1
 
@@ -34,4 +35,11 @@ class FakeTelegramClient:
             raise self._error
         self.answered_callbacks.append(
             {"callback_query_id": callback_query_id, "text": text}
+        )
+
+    def set_webhook(self, *, url: str, secret_token: str) -> None:
+        if self._error is not None:
+            raise self._error
+        self.webhook_configurations.append(
+            {"url": url, "secret_token": secret_token}
         )

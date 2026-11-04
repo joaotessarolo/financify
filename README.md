@@ -53,8 +53,13 @@ transaction.
 - Case-insensitive email normalization and database constraint.
 - Password validation using Django's configured validators.
 - Customized Django Admin integration.
-- User registration serializer and HTTP endpoint.
-- Model, serializer, and API integration test suites.
+- Session authentication, user registration, and profile endpoints.
+- Double-entry ledger with default accounts and atomic posting.
+- Telegram account linking and idempotent webhook processing.
+- Deterministic expense and income drafts from Telegram text.
+- Inline confirmation and cancellation of transaction drafts.
+- Health and readiness endpoints for deployment probes.
+- Model, service, client, and API integration test suites.
 
 ## Technology stack
 
@@ -136,9 +141,39 @@ The committed `.env.example` documents the local configuration contract:
 | `DJANGO_SECRET_KEY` | Signs security-sensitive Django values |
 | `DJANGO_ALLOWED_HOSTS` | Comma-separated list of accepted hosts |
 | `DATABASE_URL` | PostgreSQL connection URL |
+| `TELEGRAM_BOT_USERNAME` | Bot username without the leading `@` |
+| `TELEGRAM_BOT_TOKEN` | Secret token issued by BotFather |
+| `TELEGRAM_WEBHOOK_SECRET` | Shared secret used to authenticate webhook requests |
+| `TELEGRAM_LINK_TOKEN_TTL_SECONDS` | Lifetime of account-linking URLs |
+| `TELEGRAM_API_TIMEOUT_SECONDS` | Timeout for Telegram Bot API requests |
+| `TELEGRAM_API_MAX_RETRIES` | Retries for timeouts, rate limits, and server errors |
+| `TELEGRAM_API_RETRY_DELAY_SECONDS` | Initial exponential retry delay |
+| `TRANSACTION_DRAFT_TTL_SECONDS` | Lifetime of pending financial drafts |
 
 The local `.env` file is intentionally ignored by Git. Production secrets must
 be supplied by the deployment platform or a dedicated secret manager.
+
+## Telegram operation
+
+Configure the bot token, username, and webhook secret in the environment. Once
+the API is available through a public HTTPS URL, register the webhook:
+
+```bash
+cd apps/api
+uv run python manage.py configure_telegram_webhook \
+  --url https://api.example.com/api/v1/telegram/webhook/
+```
+
+The command sends only the configured URL, webhook secret, and supported update
+types to Telegram. It does not print secrets. Transient Bot API failures use
+bounded exponential retries.
+
+Deployment probes are available without session authentication:
+
+```text
+GET /health/  # process liveness
+GET /ready/   # database and required Telegram configuration
+```
 
 ## API
 

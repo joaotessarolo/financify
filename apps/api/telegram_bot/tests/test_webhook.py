@@ -395,13 +395,14 @@ class TelegramWebhookViewTests(APITestCase):
         with patch(
             "telegram_bot.webhook.consume_telegram_link",
             side_effect=RuntimeError("boom"),
-        ), self.assertLogs("telegram_bot.webhook", level="ERROR"):
+        ), self.assertLogs("telegram_bot.webhook", level="ERROR") as logs:
             response = self._post(self._message_update())
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         update = TelegramUpdate.objects.get()
         self.assertEqual(update.status, TelegramUpdateStatus.FAILED)
         self.assertEqual(update.error_code, "internal_error")
+        self.assertEqual(logs.records[0].telegram_update_id, 1000)
 
     # --- Outbound replies ---------------------------------------------------
 

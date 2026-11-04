@@ -118,6 +118,90 @@ class HttpTelegramClientTests(SimpleTestCase):
             {"callback_query_id": "callback-1", "text": "Confirmado"},
         )
 
+    def test_set_webhook_posts_https_url_secret_and_allowed_updates(self):
+        with patch(
+            URLOPEN,
+            return_value=_response({"ok": True, "result": True}),
+        ) as mock_urlopen:
+            self.client.set_webhook(
+                url="https://example.com/api/v1/telegram/webhook/",
+                secret_token="webhook-secret",
+            )
+
+        request = mock_urlopen.call_args.args[0]
+        self.assertTrue(request.full_url.endswith("/setWebhook"))
+        self.assertEqual(
+            json.loads(request.data),
+            {
+                "url": "https://example.com/api/v1/telegram/webhook/",
+                "secret_token": "webhook-secret",
+                "allowed_updates": ["message", "callback_query"],
+            },
+        )
+
+    def test_set_webhook_requires_https_and_secret(self):
+        for url, secret in (
+            ("http://example.com/webhook", "secret"),
+            ("https://example.com/webhook", ""),
+        ):
+            with self.subTest(url=url, secret=secret):
+                with self.assertRaises(ValueError):
+                    self.client.set_webhook(url=url, secret_token=secret)
+
+    def test_retries_transient_failures_with_exponential_delay(self):
+        client = HttpTelegramClient(
+            bot_token=BOT_TOKEN,
+            timeout_seconds=5,
+            max_retries=2,
+            retry_delay_seconds=0.1,
+        )
+        success = _response({"ok": True, "result": {"message_id": 42}})
+        with patch(
+            URLOPEN,
+            side_effect=[socket.timeout("first"), _http_error(503), success],
+        ) as mock_urlopen, patch(
+            "telegram_bot.client.time.sleep"
+        ) as mock_sleep:
+            message_id = client.send_message(chat_id=1, text="hi")
+
+        self.assertEqual(message_id, 42)
+        self.assertEqual(mock_urlopen.call_count, 3)
+        self.assertEqual(
+            [call.args[0] for call in mock_sleep.call_args_list],
+            [0.1, 0.2],
+        )
+
+    def test_does_not_retry_permanent_or_invalid_response_errors(self):
+        client = HttpTelegramClient(
+            bot_token=BOT_TOKEN,
+            timeout_seconds=5,
+            max_retries=2,
+            retry_delay_seconds=0,
+        )
+        for response_or_error, expected_error in (
+            (
+                _http_error(
+                    400,
+                    json.dumps({"ok": False, "description": "Bad Request"}).encode(),
+                ),
+                TelegramAPIError,
+            ),
+            (_response(b"not-json"), TelegramInvalidResponseError),
+        ):
+            with self.subTest(error=expected_error.__name__):
+                with patch(
+                    URLOPEN,
+                    side_effect=response_or_error
+                    if isinstance(response_or_error, BaseException)
+                    else None,
+                    return_value=None
+                    if isinstance(response_or_error, BaseException)
+                    else response_or_error,
+                ) as mock_urlopen:
+                    with self.assertRaises(expected_error):
+                        client.send_message(chat_id=1, text="hi")
+                self.assertEqual(mock_urlopen.call_count, 1)
+
     def test_empty_text_is_rejected_without_request(self):
         with patch(URLOPEN) as mock_urlopen:
             with self.assertRaises(ValueError):
@@ -217,16 +301,33 @@ class HttpTelegramClientTests(SimpleTestCase):
                 HttpTelegramClient(
                     bot_token=BOT_TOKEN, timeout_seconds=invalid_timeout
                 )
+        for invalid_retries in (-1, -2):
+            with self.assertRaises(ImproperlyConfigured):
+                HttpTelegramClient(
+                    bot_token=BOT_TOKEN,
+                    timeout_seconds=5,
+                    max_retries=invalid_retries,
+                )
+        with self.assertRaises(ImproperlyConfigured):
+            HttpTelegramClient(
+                bot_token=BOT_TOKEN,
+                timeout_seconds=5,
+                retry_delay_seconds=-0.1,
+            )
 
 
 class GetTelegramClientTests(SimpleTestCase):
     @override_settings(
-        TELEGRAM_BOT_TOKEN=BOT_TOKEN, TELEGRAM_API_TIMEOUT_SECONDS=7.5
+        TELEGRAM_BOT_TOKEN=BOT_TOKEN,
+        TELEGRAM_API_TIMEOUT_SECONDS=7.5,
+        TELEGRAM_API_MAX_RETRIES=3,
+        TELEGRAM_API_RETRY_DELAY_SECONDS=0.5,
     )
     def test_builds_http_client_from_settings(self):
         client = get_telegram_client()
         self.assertIsInstance(client, HttpTelegramClient)
         self.assertIn("7.5", repr(client))
+        self.assertIn("max_retries=3", repr(client))
 
     @override_settings(TELEGRAM_BOT_TOKEN="")
     def test_missing_token_raises_improperly_configured(self):

@@ -8,6 +8,7 @@ exceptions raised here.
 import json
 import logging
 import socket
+import time
 from typing import Protocol
 import urllib.error
 import urllib.request
@@ -58,6 +59,10 @@ class TelegramClient(Protocol):
         """Acknowledge a callback query and remove Telegram's loading state."""
         ...
 
+    def set_webhook(self, *, url: str, secret_token: str) -> None:
+        """Configure Telegram to deliver updates to the given HTTPS URL."""
+        ...
+
 
 class HttpTelegramClient:
     def __init__(
@@ -65,6 +70,8 @@ class HttpTelegramClient:
         *,
         bot_token: str,
         timeout_seconds: float,
+        max_retries: int = 0,
+        retry_delay_seconds: float = 0.25,
         base_url: str = TELEGRAM_API_BASE_URL,
     ):
         if not bot_token:
@@ -73,12 +80,26 @@ class HttpTelegramClient:
             raise ImproperlyConfigured(
                 "TELEGRAM_API_TIMEOUT_SECONDS must be greater than zero."
             )
+        if max_retries < 0:
+            raise ImproperlyConfigured(
+                "TELEGRAM_API_MAX_RETRIES must not be negative."
+            )
+        if retry_delay_seconds < 0:
+            raise ImproperlyConfigured(
+                "TELEGRAM_API_RETRY_DELAY_SECONDS must not be negative."
+            )
         self._bot_token = bot_token
         self._timeout_seconds = timeout_seconds
+        self._max_retries = max_retries
+        self._retry_delay_seconds = retry_delay_seconds
         self._base_url = base_url.rstrip("/")
 
     def __repr__(self) -> str:
-        return f"HttpTelegramClient(timeout_seconds={self._timeout_seconds})"
+        return (
+            "HttpTelegramClient("
+            f"timeout_seconds={self._timeout_seconds}, "
+            f"max_retries={self._max_retries})"
+        )
 
     def send_message(
         self,
@@ -110,7 +131,31 @@ class HttpTelegramClient:
             params["text"] = text
         self._call("answerCallbackQuery", params)
 
+    def set_webhook(self, *, url: str, secret_token: str) -> None:
+        if not url.startswith("https://"):
+            raise ValueError("Telegram webhook URL must use HTTPS.")
+        if not secret_token:
+            raise ValueError("secret_token must not be empty.")
+        self._call(
+            "setWebhook",
+            {
+                "url": url,
+                "secret_token": secret_token,
+                "allowed_updates": ["message", "callback_query"],
+            },
+        )
+
     def _call(self, method: str, params: dict):
+        for attempt in range(self._max_retries + 1):
+            try:
+                return self._call_once(method, params)
+            except TelegramUnavailableError:
+                if attempt >= self._max_retries:
+                    raise
+                time.sleep(self._retry_delay_seconds * (2**attempt))
+        raise AssertionError("unreachable")
+
+    def _call_once(self, method: str, params: dict):
         request = urllib.request.Request(
             f"{self._base_url}/bot{self._bot_token}/{method}",
             data=json.dumps(params).encode("utf-8"),
@@ -176,4 +221,6 @@ def get_telegram_client() -> TelegramClient:
     return HttpTelegramClient(
         bot_token=settings.TELEGRAM_BOT_TOKEN,
         timeout_seconds=settings.TELEGRAM_API_TIMEOUT_SECONDS,
+        max_retries=settings.TELEGRAM_API_MAX_RETRIES,
+        retry_delay_seconds=settings.TELEGRAM_API_RETRY_DELAY_SECONDS,
     )

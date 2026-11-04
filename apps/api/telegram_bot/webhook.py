@@ -466,6 +466,7 @@ def _send_reply(
         logger.warning(
             "Telegram client not configured; reply for update %s skipped.",
             update_id,
+            extra={"telegram_update_id": update_id},
         )
         return False
     except TelegramClientError as exc:
@@ -474,12 +475,14 @@ def _send_reply(
             "Failed to send reply for Telegram update %s: %s",
             update_id,
             exc,
+            extra={"telegram_update_id": update_id},
         )
         return False
     except Exception:
         logger.error(
             "Unexpected error sending reply for Telegram update %s.",
             update_id,
+            extra={"telegram_update_id": update_id},
         )
         return False
 
@@ -502,11 +505,13 @@ def _answer_callback(
         logger.warning(
             "Failed to answer callback for Telegram update %s.",
             update_id,
+            extra={"telegram_update_id": update_id},
         )
     except Exception:
         logger.error(
             "Unexpected error answering callback for Telegram update %s.",
             update_id,
+            extra={"telegram_update_id": update_id},
         )
     return client
 
@@ -533,7 +538,9 @@ def process_update(payload, *, client: TelegramClient | None = None) -> bool:
         result = DispatchResult(reply=ERROR_REPLIES.get(exc.error_code))
     except Exception:
         logger.error(
-            "Unexpected error processing Telegram update %s.", parsed.update_id
+            "Unexpected error processing Telegram update %s.",
+            parsed.update_id,
+            extra={"telegram_update_id": parsed.update_id},
         )
         _finish_update(update, error_code="internal_error")
         result = DispatchResult(reply=ERROR_REPLIES["internal_error"])
@@ -566,5 +573,6 @@ def process_update(payload, *, client: TelegramClient | None = None) -> bool:
                 logger.error(
                     "Failed to persist outbound message for Telegram update %s.",
                     parsed.update_id,
+                    extra={"telegram_update_id": parsed.update_id},
                 )
     return True
