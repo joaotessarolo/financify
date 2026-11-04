@@ -166,3 +166,13 @@ TELEGRAM_WEBHOOK_SECRET = env(
     "TELEGRAM_WEBHOOK_SECRET",
     default="",
 )
+
+TELEGRAM_BOT_TOKEN = env(
+    "TELEGRAM_BOT_TOKEN",
+    default="",
+)
+
+TELEGRAM_API_TIMEOUT_SECONDS = env.float(
+    "TELEGRAM_API_TIMEOUT_SECONDS",
+    default=10.0,
+)

@@ -10,6 +10,10 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
+from ..client import (
+    TelegramAPIError,
+    TelegramUnavailableError,
+)
 from ..models import (
     TelegramIdentity,
     TelegramLinkToken,
@@ -17,6 +21,8 @@ from ..models import (
     TelegramUpdateStatus,
     TelegramUpdateType,
 )
+from ..webhook import ERROR_REPLIES, LINK_SUCCESS_REPLY
+from .fakes import FakeTelegramClient
 
 WEBHOOK_SECRET = "test-webhook-secret"
 TELEGRAM_ID = 123456789
@@ -39,6 +45,13 @@ class TelegramWebhookViewTests(APITestCase):
 
     def setUp(self):
         self.client = APIClient(enforce_csrf_checks=True)
+        self.telegram = FakeTelegramClient()
+        patcher = patch(
+            "telegram_bot.webhook.get_telegram_client",
+            return_value=self.telegram,
+        )
+        self.mock_get_client = patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _create_token(self, raw_token="raw-link-token", user=None):
         return TelegramLinkToken.objects.create(
@@ -354,3 +367,114 @@ class TelegramWebhookViewTests(APITestCase):
         update = TelegramUpdate.objects.get()
         self.assertEqual(update.status, TelegramUpdateStatus.FAILED)
         self.assertEqual(update.error_code, "internal_error")
+
+    # --- Outbound replies ---------------------------------------------------
+
+    def test_valid_start_replies_with_link_confirmation(self):
+        self._create_token()
+
+        self._post(self._message_update())
+
+        self.assertEqual(
+            self.telegram.sent_messages,
+            [{"chat_id": TELEGRAM_ID, "text": LINK_SUCCESS_REPLY}],
+        )
+
+    def test_known_failures_reply_with_friendly_message(self):
+        token = self._create_token()
+        TelegramLinkToken.objects.filter(pk=token.pk).update(
+            created_at=timezone.now() - timedelta(minutes=20),
+            expires_at=timezone.now() - timedelta(minutes=1),
+        )
+        cases = (
+            (4001, "/start raw-link-token", "expired_link_token"),
+            (4002, "/start unknown", "invalid_link_token"),
+            (4003, "/start", "start_without_token"),
+            (4004, "gastei 35", "unsupported_message"),
+        )
+        for update_id, text, error_code in cases:
+            with self.subTest(error_code=error_code):
+                self.telegram.sent_messages.clear()
+                self._post(self._message_update(update_id=update_id, text=text))
+                self.assertEqual(
+                    self.telegram.sent_messages,
+                    [{"chat_id": TELEGRAM_ID, "text": ERROR_REPLIES[error_code]}],
+                )
+
+    def test_failure_replies_never_echo_the_token(self):
+        self._post(self._message_update(text="/start secret-raw-token"))
+
+        for sent in self.telegram.sent_messages:
+            self.assertNotIn("secret-raw-token", sent["text"])
+
+    def test_non_private_chat_gets_no_reply(self):
+        self._post(
+            self._message_update(chat_type="group", chat_id=-100123456789)
+        )
+
+        self.assertEqual(self.telegram.sent_messages, [])
+
+    def test_callback_and_unknown_updates_get_no_reply(self):
+        self._post({"update_id": 5001, "callback_query": {"id": "x"}})
+        self._post({"update_id": 5002, "edited_message": {}})
+
+        self.assertEqual(self.telegram.sent_messages, [])
+
+    def test_duplicate_update_does_not_reply_twice(self):
+        self._create_token()
+
+        self._post(self._message_update())
+        self._post(self._message_update())
+
+        self.assertEqual(len(self.telegram.sent_messages), 1)
+
+    def test_send_failure_does_not_undo_completed_link(self):
+        token = self._create_token()
+        for error in (
+            TelegramUnavailableError("Telegram sendMessage timed out."),
+            TelegramAPIError("rejected", status_code=403),
+        ):
+            with self.subTest(error=type(error).__name__):
+                TelegramIdentity.objects.all().delete()
+                TelegramUpdate.objects.all().delete()
+                TelegramLinkToken.objects.filter(pk=token.pk).update(used_at=None)
+                self.mock_get_client.return_value = FakeTelegramClient(
+                    error=error
+                )
+
+                with self.assertLogs("telegram_bot.webhook", level="WARNING"):
+                    response = self._post(self._message_update())
+
+                self.assertEqual(response.status_code, status.HTTP_200_OK)
+                self.assertEqual(TelegramIdentity.objects.count(), 1)
+                token.refresh_from_db()
+                self.assertTrue(token.is_used)
+                update = TelegramUpdate.objects.get()
+                self.assertEqual(update.status, TelegramUpdateStatus.COMPLETED)
+
+    def test_unconfigured_client_skips_reply_but_keeps_link(self):
+        from django.core.exceptions import ImproperlyConfigured
+
+        self._create_token()
+        self.mock_get_client.side_effect = ImproperlyConfigured("missing")
+
+        with self.assertLogs("telegram_bot.webhook", level="WARNING"):
+            response = self._post(self._message_update())
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(TelegramIdentity.objects.count(), 1)
+        self.assertEqual(
+            TelegramUpdate.objects.get().status, TelegramUpdateStatus.COMPLETED
+        )
+
+    def test_token_never_appears_in_logs(self):
+        self._create_token(raw_token="log-sensitive-token")
+        self.mock_get_client.return_value = FakeTelegramClient(
+            error=TelegramUnavailableError("Telegram sendMessage timed out.")
+        )
+
+        with self.assertLogs("telegram_bot", level="DEBUG") as logs:
+            self._post(self._message_update(text="/start log-sensitive-token"))
+
+        for line in logs.output:
+            self.assertNotIn("log-sensitive-token", line)

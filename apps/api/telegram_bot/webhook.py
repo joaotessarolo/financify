@@ -11,9 +11,11 @@ are persisted or logged.
 from dataclasses import dataclass
 import logging
 
+from django.core.exceptions import ImproperlyConfigured
 from django.db import IntegrityError, transaction as db_transaction
 from django.utils import timezone
 
+from .client import TelegramClient, TelegramClientError, get_telegram_client
 from .models import TelegramUpdate, TelegramUpdateStatus, TelegramUpdateType
 from .services import (
     ExpiredTelegramLinkTokenError,
@@ -29,6 +31,43 @@ from .services import (
 logger = logging.getLogger(__name__)
 
 START_COMMAND = "/start"
+
+LINK_SUCCESS_REPLY = (
+    "Sua conta Financify foi conectada ao Telegram. "
+    "Agora você pode registrar seus gastos por aqui."
+)
+
+# Safe, user-facing replies for known failures. Codes absent from this map
+# (e.g. non_private_chat, malformed updates) get no reply at all.
+ERROR_REPLIES: dict[str, str] = {
+    "start_without_token": (
+        "Para conectar sua conta, gere um novo link no Financify "
+        "e abra-o por aqui."
+    ),
+    "invalid_link_token": (
+        "Este link de conexão não é válido. Gere um novo link no Financify."
+    ),
+    "expired_link_token": (
+        "Este link de conexão expirou. Gere um novo link no Financify."
+    ),
+    "used_link_token": (
+        "Este link de conexão já foi utilizado. "
+        "Gere um novo link no Financify se precisar."
+    ),
+    "telegram_account_already_linked": (
+        "Esta conta do Telegram já está conectada a outro usuário do Financify."
+    ),
+    "user_already_linked": (
+        "Sua conta Financify já está conectada a outro Telegram. "
+        "Desconecte-o no Financify antes de continuar."
+    ),
+    "invalid_chat": "Não foi possível conectar a conta por esta conversa.",
+    "unsupported_message": "Ainda não consigo entender esta mensagem.",
+    "unsupported_command": "Não reconheço este comando.",
+    "internal_error": (
+        "Ocorreu um erro inesperado. Tente novamente em alguns instantes."
+    ),
+}
 
 
 class InvalidTelegramUpdateError(Exception):
@@ -126,7 +165,7 @@ def _parse_command(text: str) -> tuple[str, str]:
     return command, rest.strip()
 
 
-def handle_start_command(*, argument: str, from_id: int, chat_id: int) -> None:
+def handle_start_command(*, argument: str, from_id: int, chat_id: int) -> str:
     if not argument:
         raise TelegramUpdateProcessingError("start_without_token")
     try:
@@ -137,9 +176,21 @@ def handle_start_command(*, argument: str, from_id: int, chat_id: int) -> None:
         )
     except TelegramLinkError as exc:
         raise TelegramUpdateProcessingError(_link_error_code(exc)) from exc
+    return LINK_SUCCESS_REPLY
 
 
-def handle_message(message: dict) -> None:
+def _private_chat_id(parsed: ParsedUpdate) -> int | None:
+    """Chat to reply to, only for well-formed private-chat messages."""
+    if parsed.update_type != TelegramUpdateType.MESSAGE:
+        return None
+    chat = parsed.payload["message"].get("chat")
+    if not isinstance(chat, dict) or chat.get("type") != "private":
+        return None
+    chat_id = chat.get("id")
+    return chat_id if _is_positive_int(chat_id) else None
+
+
+def handle_message(message: dict) -> str:
     chat = message.get("chat")
     sender = message.get("from")
     if not isinstance(chat, dict) or not isinstance(sender, dict):
@@ -159,21 +210,56 @@ def handle_message(message: dict) -> None:
 
     command, argument = _parse_command(text)
     if command == START_COMMAND:
-        handle_start_command(argument=argument, from_id=from_id, chat_id=chat_id)
-        return
+        return handle_start_command(
+            argument=argument, from_id=from_id, chat_id=chat_id
+        )
 
     raise TelegramUpdateProcessingError("unsupported_command")
 
 
-def dispatch(parsed: ParsedUpdate) -> None:
+def dispatch(parsed: ParsedUpdate) -> str | None:
     if parsed.update_type == TelegramUpdateType.MESSAGE:
-        handle_message(parsed.payload["message"])
-        return
+        return handle_message(parsed.payload["message"])
     raise TelegramUpdateProcessingError("unsupported_update_type")
 
 
-def process_update(payload) -> bool:
+def _send_reply(
+    client: TelegramClient | None,
+    *,
+    update_id: int,
+    chat_id: int,
+    text: str,
+) -> None:
+    """Best-effort reply. Failures are logged and never propagate."""
+    try:
+        if client is None:
+            client = get_telegram_client()
+        client.send_message(chat_id=chat_id, text=text)
+    except ImproperlyConfigured:
+        logger.warning(
+            "Telegram client not configured; reply for update %s skipped.",
+            update_id,
+        )
+    except TelegramClientError as exc:
+        # Our client errors never contain the bot token or message text.
+        logger.warning(
+            "Failed to send reply for Telegram update %s: %s",
+            update_id,
+            exc,
+        )
+    except Exception:
+        logger.error(
+            "Unexpected error sending reply for Telegram update %s.",
+            update_id,
+        )
+
+
+def process_update(payload, *, client: TelegramClient | None = None) -> bool:
     """Record and process an update. Return False if it was a duplicate.
+
+    ``client`` may be injected (tests, workers); otherwise one is built from
+    settings when a reply is needed. Replies are sent after the update is
+    finalized, so a send failure never undoes completed work.
 
     Raises InvalidTelegramUpdateError for malformed payloads.
     """
@@ -182,15 +268,24 @@ def process_update(payload) -> bool:
     if update is None:
         return False
 
+    reply: str | None = None
     try:
-        dispatch(parsed)
+        reply = dispatch(parsed)
     except TelegramUpdateProcessingError as exc:
         _finish_update(update, error_code=exc.error_code)
+        reply = ERROR_REPLIES.get(exc.error_code)
     except Exception:
-        logger.exception(
-            "Unexpected error processing Telegram update %s", parsed.update_id
+        logger.error(
+            "Unexpected error processing Telegram update %s.", parsed.update_id
         )
         _finish_update(update, error_code="internal_error")
+        reply = ERROR_REPLIES["internal_error"]
     else:
         _finish_update(update)
+
+    chat_id = _private_chat_id(parsed)
+    if reply and chat_id is not None:
+        _send_reply(
+            client, update_id=parsed.update_id, chat_id=chat_id, text=reply
+        )
     return True
