@@ -148,6 +148,37 @@ class HttpTelegramClientTests(SimpleTestCase):
                 with self.assertRaises(ValueError):
                     self.client.set_webhook(url=url, secret_token=secret)
 
+    def test_get_updates_uses_long_poll_timeout_and_offset(self):
+        updates = [{"update_id": 10, "message": {}}]
+        with patch(
+            URLOPEN,
+            return_value=_response({"ok": True, "result": updates}),
+        ) as mock_urlopen:
+            result = self.client.get_updates(offset=10, timeout=30)
+
+        self.assertEqual(result, updates)
+        request = mock_urlopen.call_args.args[0]
+        self.assertTrue(request.full_url.endswith("/getUpdates"))
+        self.assertEqual(mock_urlopen.call_args.kwargs["timeout"], 35)
+        self.assertEqual(
+            json.loads(request.data),
+            {
+                "offset": 10,
+                "timeout": 30,
+                "allowed_updates": ["message", "callback_query"],
+            },
+        )
+
+    def test_get_updates_rejects_invalid_result_and_timeout(self):
+        with patch(
+            URLOPEN,
+            return_value=_response({"ok": True, "result": {}}),
+        ):
+            with self.assertRaises(TelegramInvalidResponseError):
+                self.client.get_updates(offset=None, timeout=0)
+        with self.assertRaises(ValueError):
+            self.client.get_updates(offset=None, timeout=-1)
+
     def test_retries_transient_failures_with_exponential_delay(self):
         client = HttpTelegramClient(
             bot_token=BOT_TOKEN,

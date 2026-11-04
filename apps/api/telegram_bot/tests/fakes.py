@@ -4,10 +4,17 @@ from ..client import TelegramClientError
 class FakeTelegramClient:
     """In-memory TelegramClient for tests."""
 
-    def __init__(self, *, error: TelegramClientError | None = None):
+    def __init__(
+        self,
+        *,
+        error: TelegramClientError | None = None,
+        updates: list[dict] | None = None,
+    ):
         self.sent_messages: list[dict] = []
         self.answered_callbacks: list[dict] = []
         self.webhook_configurations: list[dict] = []
+        self.get_updates_calls: list[dict] = []
+        self._updates = list(updates or [])
         self._error = error
         self._next_message_id = 1
 
@@ -43,3 +50,11 @@ class FakeTelegramClient:
         self.webhook_configurations.append(
             {"url": url, "secret_token": secret_token}
         )
+
+    def get_updates(self, *, offset: int | None, timeout: int) -> list[dict]:
+        if self._error is not None:
+            raise self._error
+        self.get_updates_calls.append({"offset": offset, "timeout": timeout})
+        updates = self._updates
+        self._updates = []
+        return updates

@@ -8,11 +8,13 @@ exceptions raised here.
 import json
 import logging
 import socket
+import ssl
 import time
 from typing import Protocol
 import urllib.error
 import urllib.request
 
+import certifi
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
@@ -63,6 +65,10 @@ class TelegramClient(Protocol):
         """Configure Telegram to deliver updates to the given HTTPS URL."""
         ...
 
+    def get_updates(self, *, offset: int | None, timeout: int) -> list[dict]:
+        """Fetch the next batch of updates using Telegram long polling."""
+        ...
+
 
 class HttpTelegramClient:
     def __init__(
@@ -93,6 +99,7 @@ class HttpTelegramClient:
         self._max_retries = max_retries
         self._retry_delay_seconds = retry_delay_seconds
         self._base_url = base_url.rstrip("/")
+        self._ssl_context = ssl.create_default_context(cafile=certifi.where())
 
     def __repr__(self) -> str:
         return (
@@ -145,17 +152,55 @@ class HttpTelegramClient:
             },
         )
 
-    def _call(self, method: str, params: dict):
+    def get_updates(self, *, offset: int | None, timeout: int) -> list[dict]:
+        if timeout < 0:
+            raise ValueError("timeout must not be negative.")
+        params = {
+            "timeout": timeout,
+            "allowed_updates": ["message", "callback_query"],
+        }
+        if offset is not None:
+            params["offset"] = offset
+        result = self._call(
+            "getUpdates",
+            params,
+            timeout_seconds=max(self._timeout_seconds, timeout + 5),
+        )
+        if not isinstance(result, list) or not all(
+            isinstance(update, dict) for update in result
+        ):
+            raise TelegramInvalidResponseError(
+                "Telegram getUpdates returned an invalid result."
+            )
+        return result
+
+    def _call(
+        self,
+        method: str,
+        params: dict,
+        *,
+        timeout_seconds: float | None = None,
+    ):
         for attempt in range(self._max_retries + 1):
             try:
-                return self._call_once(method, params)
+                return self._call_once(
+                    method,
+                    params,
+                    timeout_seconds=timeout_seconds,
+                )
             except TelegramUnavailableError:
                 if attempt >= self._max_retries:
                     raise
                 time.sleep(self._retry_delay_seconds * (2**attempt))
         raise AssertionError("unreachable")
 
-    def _call_once(self, method: str, params: dict):
+    def _call_once(
+        self,
+        method: str,
+        params: dict,
+        *,
+        timeout_seconds: float | None = None,
+    ):
         request = urllib.request.Request(
             f"{self._base_url}/bot{self._bot_token}/{method}",
             data=json.dumps(params).encode("utf-8"),
@@ -166,7 +211,9 @@ class HttpTelegramClient:
         # `from None` everywhere: the original exceptions may carry the URL.
         try:
             with urllib.request.urlopen(
-                request, timeout=self._timeout_seconds
+                request,
+                timeout=timeout_seconds or self._timeout_seconds,
+                context=self._ssl_context,
             ) as response:
                 status_code = response.status
                 body = response.read()

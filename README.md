@@ -175,6 +175,18 @@ GET /health/  # process liveness
 GET /ready/   # database and required Telegram configuration
 ```
 
+For local development without a public HTTPS URL, run the same bot processing
+flow through Telegram long polling:
+
+```bash
+cd apps/api
+uv run python manage.py run_telegram_bot
+```
+
+Only one delivery mode may consume updates at a time. Stop long polling before
+enabling the production webhook. Use `--once --poll-timeout 1` for a quick
+connectivity diagnostic.
+
 ## API
 
 ### Register a user
