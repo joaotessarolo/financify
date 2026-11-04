@@ -5,6 +5,19 @@ from django.core.validators import MinValueValidator
 from django.db import models
 
 
+class TelegramUpdateType(models.TextChoices):
+    MESSAGE = "MESSAGE", "Message"
+    CALLBACK_QUERY = "CALLBACK_QUERY", "Callback query"
+    UNSUPPORTED = "UNSUPPORTED", "Unsupported"
+
+
+class TelegramUpdateStatus(models.TextChoices):
+    RECEIVED = "RECEIVED", "Received"
+    PROCESSING = "PROCESSING", "Processing"
+    COMPLETED = "COMPLETED", "Completed"
+    FAILED = "FAILED", "Failed"
+
+
 class TelegramIdentity(models.Model):
     id = models.UUIDField(
         primary_key=True,
@@ -105,3 +118,92 @@ class TelegramLinkToken(models.Model):
 
     def __str__(self):
         return f"Telegram link token {self.id}"
+
+
+class TelegramUpdate(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+    update_id = models.BigIntegerField(
+        unique=True,
+        validators=[MinValueValidator(1)],
+    )
+    update_type = models.CharField(
+        max_length=20,
+        choices=TelegramUpdateType.choices,
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=TelegramUpdateStatus.choices,
+        default=TelegramUpdateStatus.RECEIVED,
+    )
+    error_code = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+    )
+    received_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+    processed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        constraints = [  # noqa: RUF012
+            models.CheckConstraint(
+                condition=models.Q(update_id__gt=0),
+                name="telegram_bot_update_update_id_positive",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    update_type__in=TelegramUpdateType.values,
+                ),
+                name="telegram_bot_update_type_supported",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    status__in=TelegramUpdateStatus.values,
+                ),
+                name="telegram_bot_update_status_supported",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        status__in=[
+                            TelegramUpdateStatus.RECEIVED,
+                            TelegramUpdateStatus.PROCESSING,
+                        ],
+                        processed_at__isnull=True,
+                    )
+                    | models.Q(
+                        status__in=[
+                            TelegramUpdateStatus.COMPLETED,
+                            TelegramUpdateStatus.FAILED,
+                        ],
+                        processed_at__isnull=False,
+                    )
+                ),
+                name="telegram_bot_update_processed_at_consistency",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(status=TelegramUpdateStatus.FAILED)
+                    | models.Q(
+                        status__in=[
+                            TelegramUpdateStatus.RECEIVED,
+                            TelegramUpdateStatus.PROCESSING,
+                            TelegramUpdateStatus.COMPLETED,
+                        ],
+                        error_code="",
+                    )
+                ),
+                name="telegram_bot_update_error_code_consistency",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Telegram update {self.update_id} ({self.get_status_display()})"

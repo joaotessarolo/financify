@@ -7,7 +7,13 @@ from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 
-from ..models import TelegramIdentity, TelegramLinkToken
+from ..models import (
+    TelegramIdentity,
+    TelegramLinkToken,
+    TelegramUpdate,
+    TelegramUpdateStatus,
+    TelegramUpdateType,
+)
 
 
 class TelegramIdentityModelTests(TestCase):
@@ -331,3 +337,179 @@ class TelegramLinkTokenModelTests(TestCase):
                 token.refresh_from_db()
                 self.assertEqual(token.used_at, valid_used_at)
                 self.assertTrue(token.is_used)
+
+
+class TelegramUpdateModelTests(TestCase):
+    def test_create_valid_telegram_update_with_defaults(self):
+        update = TelegramUpdate.objects.create(
+            update_id=100001,
+            update_type=TelegramUpdateType.MESSAGE,
+        )
+
+        self.assertIsInstance(update.id, uuid.UUID)
+        self.assertEqual(update.update_id, 100001)
+        self.assertEqual(update.update_type, TelegramUpdateType.MESSAGE)
+        self.assertEqual(update.status, TelegramUpdateStatus.RECEIVED)
+        self.assertEqual(update.error_code, "")
+        self.assertIsNotNone(update.received_at)
+        self.assertIsNone(update.processed_at)
+        update.full_clean()
+
+    def test_create_completed_and_failed_updates_with_processed_at(self):
+        processed_at = timezone.now()
+        completed_update = TelegramUpdate.objects.create(
+            update_id=100002,
+            update_type=TelegramUpdateType.CALLBACK_QUERY,
+            status=TelegramUpdateStatus.COMPLETED,
+            processed_at=processed_at,
+        )
+        failed_update = TelegramUpdate.objects.create(
+            update_id=100003,
+            update_type=TelegramUpdateType.UNSUPPORTED,
+            status=TelegramUpdateStatus.FAILED,
+            error_code="unsupported_update_type",
+            processed_at=processed_at,
+        )
+
+        completed_update.full_clean()
+        failed_update.full_clean()
+        self.assertEqual(completed_update.processed_at, processed_at)
+        self.assertEqual(failed_update.error_code, "unsupported_update_type")
+
+    def test_str_returns_update_id_and_status_display(self):
+        update = TelegramUpdate.objects.create(
+            update_id=555555,
+            update_type=TelegramUpdateType.MESSAGE,
+        )
+
+        self.assertEqual(
+            str(update),
+            "Telegram update 555555 (Received)",
+        )
+
+    def test_update_id_must_be_unique(self):
+        TelegramUpdate.objects.create(
+            update_id=777777,
+            update_type=TelegramUpdateType.MESSAGE,
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                TelegramUpdate.objects.create(
+                    update_id=777777,
+                    update_type=TelegramUpdateType.CALLBACK_QUERY,
+                )
+
+    def test_full_clean_and_database_reject_non_positive_update_id(self):
+        for invalid_update_id in (0, -1, -999999):
+            with self.subTest(update_id=invalid_update_id):
+                update = TelegramUpdate(
+                    update_id=invalid_update_id,
+                    update_type=TelegramUpdateType.MESSAGE,
+                )
+                with self.assertRaises(ValidationError) as ctx:
+                    update.full_clean()
+                self.assertIn("update_id", ctx.exception.error_dict)
+
+                with self.assertRaises(IntegrityError):
+                    with transaction.atomic():
+                        TelegramUpdate.objects.create(
+                            update_id=invalid_update_id,
+                            update_type=TelegramUpdateType.MESSAGE,
+                        )
+
+    def test_full_clean_and_database_reject_invalid_update_type_and_status(
+        self,
+    ):
+        for field, invalid_value in (
+            ("update_type", "INVALID_TYPE"),
+            ("status", "INVALID_STATUS"),
+        ):
+            with self.subTest(field=field):
+                kwargs = {
+                    "update_id": 888888,
+                    "update_type": TelegramUpdateType.MESSAGE,
+                    "status": TelegramUpdateStatus.RECEIVED,
+                    field: invalid_value,
+                }
+                update = TelegramUpdate(**kwargs)
+                with self.assertRaises(ValidationError) as ctx:
+                    update.full_clean()
+                self.assertIn(field, ctx.exception.error_dict)
+
+                with self.assertRaises(IntegrityError):
+                    with transaction.atomic():
+                        TelegramUpdate.objects.create(**kwargs)
+
+    def test_full_clean_rejects_inconsistent_status_and_processed_at(self):
+        now = timezone.now()
+        inconsistent_cases = (
+            (TelegramUpdateStatus.RECEIVED, now),
+            (TelegramUpdateStatus.PROCESSING, now),
+            (TelegramUpdateStatus.COMPLETED, None),
+            (TelegramUpdateStatus.FAILED, None),
+        )
+
+        for status, processed_at in inconsistent_cases:
+            with self.subTest(status=status, processed_at=processed_at):
+                update = TelegramUpdate(
+                    update_id=900001,
+                    update_type=TelegramUpdateType.MESSAGE,
+                    status=status,
+                    processed_at=processed_at,
+                )
+                with self.assertRaises(ValidationError):
+                    update.full_clean()
+
+    def test_database_rejects_received_or_processing_with_processed_at(self):
+        for idx, status in enumerate(
+            (TelegramUpdateStatus.RECEIVED, TelegramUpdateStatus.PROCESSING),
+            start=1,
+        ):
+            with self.subTest(status=status):
+                with self.assertRaises(IntegrityError):
+                    with transaction.atomic():
+                        TelegramUpdate.objects.create(
+                            update_id=910000 + idx,
+                            update_type=TelegramUpdateType.MESSAGE,
+                            status=status,
+                            processed_at=timezone.now(),
+                        )
+
+    def test_database_rejects_completed_or_failed_without_processed_at(self):
+        for idx, status in enumerate(
+            (TelegramUpdateStatus.COMPLETED, TelegramUpdateStatus.FAILED),
+            start=1,
+        ):
+            with self.subTest(status=status):
+                with self.assertRaises(IntegrityError):
+                    with transaction.atomic():
+                        TelegramUpdate.objects.create(
+                            update_id=920000 + idx,
+                            update_type=TelegramUpdateType.MESSAGE,
+                            status=status,
+                            processed_at=None,
+                        )
+
+    def test_database_rejects_error_code_on_non_failed_status(self):
+        now = timezone.now()
+        non_failed_cases = (
+            (TelegramUpdateStatus.RECEIVED, None),
+            (TelegramUpdateStatus.PROCESSING, None),
+            (TelegramUpdateStatus.COMPLETED, now),
+        )
+
+        for idx, (status, processed_at) in enumerate(
+            non_failed_cases,
+            start=1,
+        ):
+            with self.subTest(status=status):
+                with self.assertRaises(IntegrityError):
+                    with transaction.atomic():
+                        TelegramUpdate.objects.create(
+                            update_id=930000 + idx,
+                            update_type=TelegramUpdateType.MESSAGE,
+                            status=status,
+                            error_code="unexpected_error_code",
+                            processed_at=processed_at,
+                        )
