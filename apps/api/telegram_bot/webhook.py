@@ -21,6 +21,7 @@ from conversations.models import (
     Conversation,
     ConversationChannel,
     TransactionDraft,
+    TransactionDraftStatus,
 )
 from conversations.extraction import (
     TextExtractionError,
@@ -130,6 +131,8 @@ class DispatchResult:
     reply_markup: dict | None = None
     callback_query_id: str | None = None
     callback_answer: str = ""
+    edit_message_id: int | None = None
+    edit_text: str | None = None
 
 
 def _draft_reply(*, description: str, amount, currency: str) -> str:
@@ -348,12 +351,14 @@ def handle_callback_query(callback: dict) -> DispatchResult:
     sender = callback.get("from")
     message = callback.get("message")
     data = callback.get("data")
+    message_id = message.get("message_id") if isinstance(message, dict) else None
     if (
         not isinstance(callback_id, str)
         or not callback_id
         or not isinstance(sender, dict)
         or not isinstance(message, dict)
         or not isinstance(data, str)
+        or not _is_positive_int(message_id)
     ):
         raise TelegramUpdateProcessingError("malformed_callback_query")
 
@@ -410,29 +415,40 @@ def handle_callback_query(callback: dict) -> DispatchResult:
 
     conversation = draft.source_message.conversation
     if parts[1] == "confirm":
+        if draft.status == TransactionDraftStatus.CONFIRMED:
+            return DispatchResult(
+                callback_query_id=callback_id,
+                callback_answer="Registro já confirmado.",
+            )
         try:
             transaction = confirm_transaction_draft(draft=draft)
         except DraftConfirmationError:
-            reply = "Este rascunho não pode mais ser confirmado."
+            edit_text = "Este rascunho não pode mais ser confirmado."
             answer = "Não foi possível confirmar."
         else:
-            reply = f"Registro confirmado: {transaction.description}."
+            edit_text = f"Registro confirmado: {transaction.description}."
             answer = "Registro confirmado."
     else:
+        if draft.status == TransactionDraftStatus.REJECTED:
+            return DispatchResult(
+                callback_query_id=callback_id,
+                callback_answer="Rascunho já cancelado.",
+            )
         try:
             reject_transaction_draft(draft=draft)
         except DraftRejectionError:
-            reply = "Este rascunho não pode mais ser cancelado."
+            edit_text = "Este rascunho não pode mais ser cancelado."
             answer = "Não foi possível cancelar."
         else:
-            reply = f"Rascunho cancelado: {draft.description}."
+            edit_text = f"Rascunho cancelado: {draft.description}."
             answer = "Rascunho cancelado."
 
     return DispatchResult(
-        reply=reply,
         conversation=conversation,
         callback_query_id=callback_id,
         callback_answer=answer,
+        edit_message_id=message_id,
+        edit_text=edit_text,
     )
 
 
@@ -516,6 +532,36 @@ def _answer_callback(
     return client
 
 
+def _edit_callback_message(
+    client: TelegramClient | None,
+    *,
+    update_id: int,
+    chat_id: int,
+    message_id: int,
+    text: str,
+) -> None:
+    try:
+        if client is None:
+            client = get_telegram_client()
+        client.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text,
+        )
+    except (ImproperlyConfigured, TelegramClientError):
+        logger.warning(
+            "Failed to edit callback message for Telegram update %s.",
+            update_id,
+            extra={"telegram_update_id": update_id},
+        )
+    except Exception:
+        logger.error(
+            "Unexpected error editing callback message for Telegram update %s.",
+            update_id,
+            extra={"telegram_update_id": update_id},
+        )
+
+
 def process_update(payload, *, client: TelegramClient | None = None) -> bool:
     """Record and process an update. Return False if it was a duplicate.
 
@@ -554,6 +600,18 @@ def process_update(payload, *, client: TelegramClient | None = None) -> bool:
             update_id=parsed.update_id,
             callback_query_id=result.callback_query_id,
             text=result.callback_answer,
+        )
+    if (
+        result.edit_message_id is not None
+        and result.edit_text
+        and chat_id is not None
+    ):
+        _edit_callback_message(
+            client,
+            update_id=parsed.update_id,
+            chat_id=chat_id,
+            message_id=result.edit_message_id,
+            text=result.edit_text,
         )
     if result.reply and chat_id is not None:
         sent = _send_reply(

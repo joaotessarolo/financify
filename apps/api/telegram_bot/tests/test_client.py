@@ -179,6 +179,29 @@ class HttpTelegramClientTests(SimpleTestCase):
         with self.assertRaises(ValueError):
             self.client.get_updates(offset=None, timeout=-1)
 
+    def test_edit_message_text_replaces_text_and_removes_keyboard(self):
+        with patch(
+            URLOPEN,
+            return_value=_response({"ok": True, "result": {"message_id": 10}}),
+        ) as mock_urlopen:
+            self.client.edit_message_text(
+                chat_id=123,
+                message_id=10,
+                text="Registro confirmado.",
+            )
+
+        request = mock_urlopen.call_args.args[0]
+        self.assertTrue(request.full_url.endswith("/editMessageText"))
+        self.assertEqual(
+            json.loads(request.data),
+            {
+                "chat_id": 123,
+                "message_id": 10,
+                "text": "Registro confirmado.",
+                "reply_markup": {"inline_keyboard": []},
+            },
+        )
+
     def test_retries_transient_failures_with_exponential_delay(self):
         client = HttpTelegramClient(
             bot_token=BOT_TOKEN,

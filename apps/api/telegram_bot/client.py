@@ -69,6 +69,12 @@ class TelegramClient(Protocol):
         """Fetch the next batch of updates using Telegram long polling."""
         ...
 
+    def edit_message_text(
+        self, *, chat_id: int, message_id: int, text: str
+    ) -> None:
+        """Replace a bot message and remove its inline keyboard."""
+        ...
+
 
 class HttpTelegramClient:
     def __init__(
@@ -173,6 +179,21 @@ class HttpTelegramClient:
                 "Telegram getUpdates returned an invalid result."
             )
         return result
+
+    def edit_message_text(
+        self, *, chat_id: int, message_id: int, text: str
+    ) -> None:
+        if not text:
+            raise ValueError("text must not be empty.")
+        self._call(
+            "editMessageText",
+            {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "text": text[:MAX_MESSAGE_LENGTH],
+                "reply_markup": {"inline_keyboard": []},
+            },
+        )
 
     def _call(
         self,

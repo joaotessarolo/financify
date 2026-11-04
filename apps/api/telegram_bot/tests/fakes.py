@@ -14,6 +14,7 @@ class FakeTelegramClient:
         self.answered_callbacks: list[dict] = []
         self.webhook_configurations: list[dict] = []
         self.get_updates_calls: list[dict] = []
+        self.edited_messages: list[dict] = []
         self._updates = list(updates or [])
         self._error = error
         self._next_message_id = 1
@@ -58,3 +59,12 @@ class FakeTelegramClient:
         updates = self._updates
         self._updates = []
         return updates
+
+    def edit_message_text(
+        self, *, chat_id: int, message_id: int, text: str
+    ) -> None:
+        if self._error is not None:
+            raise self._error
+        self.edited_messages.append(
+            {"chat_id": chat_id, "message_id": message_id, "text": text}
+        )

@@ -707,7 +707,14 @@ class TelegramWebhookViewTests(APITestCase):
                 "text": "Registro confirmado.",
             },
         )
-        self.assertIn("Registro confirmado", self.telegram.sent_messages[-1]["text"])
+        self.assertEqual(
+            self.telegram.edited_messages[-1],
+            {
+                "chat_id": TELEGRAM_ID,
+                "message_id": 10,
+                "text": "Registro confirmado: no almoço.",
+            },
+        )
         callback_update = TelegramUpdate.objects.get(update_id=7001)
         self.assertEqual(callback_update.status, TelegramUpdateStatus.COMPLETED)
 
@@ -734,6 +741,10 @@ class TelegramWebhookViewTests(APITestCase):
         self.assertEqual(
             self.telegram.answered_callbacks[-1]["text"],
             "Rascunho cancelado.",
+        )
+        self.assertEqual(
+            self.telegram.edited_messages[-1]["text"],
+            "Rascunho cancelado: salário.",
         )
 
     def test_other_linked_user_cannot_confirm_draft(self):
@@ -778,3 +789,28 @@ class TelegramWebhookViewTests(APITestCase):
 
         self.assertEqual(Transaction.objects.count(), 1)
         self.assertEqual(len(self.telegram.answered_callbacks), 1)
+
+    def test_second_confirm_callback_only_answers_already_confirmed(self):
+        self._link_identity()
+        self._post(self._message_update(update_id=7040, text="gasto 10 café"))
+        draft = TransactionDraft.objects.get()
+
+        self._post(self._callback_update(draft=draft, update_id=7041))
+        self._post(
+            self._callback_update(
+                draft=draft,
+                update_id=7042,
+                callback_id="callback-second",
+            )
+        )
+
+        self.assertEqual(Transaction.objects.count(), 1)
+        self.assertEqual(len(self.telegram.edited_messages), 1)
+        self.assertEqual(len(self.telegram.sent_messages), 1)
+        self.assertEqual(
+            self.telegram.answered_callbacks[-1],
+            {
+                "callback_query_id": "callback-second",
+                "text": "Registro já confirmado.",
+            },
+        )
