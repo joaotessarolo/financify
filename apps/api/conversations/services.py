@@ -125,7 +125,7 @@ def create_transaction_draft_from_extraction(
         AccountSystemRole.GENERAL_EXPENSE,
         AccountSystemRole.GENERAL_INCOME,
     }
-    if accounts.keys() < required_roles:
+    if not required_roles <= accounts.keys():
         raise DefaultAccountConfigurationError(
             "User does not have all active default accounts."
         )

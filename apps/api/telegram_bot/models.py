@@ -5,6 +5,12 @@ from django.core.validators import MinValueValidator
 from django.db import models
 
 
+class TelegramOnboardingStep(models.TextChoices):
+    AWAITING_ACCOUNT = "AWAITING_ACCOUNT", "Awaiting account"
+    AWAITING_BALANCE = "AWAITING_BALANCE", "Awaiting balance"
+    COMPLETED = "COMPLETED", "Completed"
+
+
 class TelegramUpdateType(models.TextChoices):
     MESSAGE = "MESSAGE", "Message"
     CALLBACK_QUERY = "CALLBACK_QUERY", "Callback query"
@@ -44,6 +50,16 @@ class TelegramIdentity(models.Model):
         null=True,
         blank=True,
     )
+    onboarding_step = models.CharField(
+        max_length=24,
+        choices=TelegramOnboardingStep.choices,
+        default=TelegramOnboardingStep.AWAITING_ACCOUNT,
+    )
+    pending_account_name = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+    )
     updated_at = models.DateTimeField(
         auto_now=True,
     )
@@ -58,6 +74,12 @@ class TelegramIdentity(models.Model):
             models.CheckConstraint(
                 condition=models.Q(private_chat_id__gt=0),
                 name="telegram_bot_identity_private_chat_id_positive",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    onboarding_step__in=TelegramOnboardingStep.values
+                ),
+                name="telegram_bot_identity_onboarding_step_supported",
             ),
         ]
 

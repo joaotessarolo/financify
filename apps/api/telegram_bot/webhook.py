@@ -41,9 +41,24 @@ from conversations.services import (
 from .client import TelegramClient, TelegramClientError, get_telegram_client
 from .models import (
     TelegramIdentity,
+    TelegramOnboardingStep,
     TelegramUpdate,
     TelegramUpdateStatus,
     TelegramUpdateType,
+)
+from .messages import (
+    ACCOUNT_ONBOARDING_PROMPT,
+    INVALID_ACCOUNT_SETUP,
+    INVALID_BALANCE,
+    balance_prompt,
+    onboarding_complete,
+)
+from .onboarding import (
+    OnboardingParseError,
+    complete_account_onboarding,
+    parse_account_setup,
+    parse_balance,
+    remember_primary_account_name,
 )
 from .services import (
     ExpiredTelegramLinkTokenError,
@@ -244,14 +259,78 @@ def handle_start_command(
     if not argument:
         raise TelegramUpdateProcessingError("start_without_token")
     try:
-        consume_telegram_link(
+        identity = consume_telegram_link(
             raw_token=argument,
             telegram_user_id=from_id,
             private_chat_id=chat_id,
         )
     except TelegramLinkError as exc:
         raise TelegramUpdateProcessingError(_link_error_code(exc)) from exc
-    return DispatchResult(reply=LINK_SUCCESS_REPLY)
+    reply = (
+        ACCOUNT_ONBOARDING_PROMPT
+        if identity.onboarding_step != TelegramOnboardingStep.COMPLETED
+        else LINK_SUCCESS_REPLY
+    )
+    return DispatchResult(reply=reply)
+
+
+def _handle_onboarding_message(
+    *, identity: TelegramIdentity, text: str, conversation: Conversation
+) -> DispatchResult:
+    if identity.onboarding_step == TelegramOnboardingStep.AWAITING_ACCOUNT:
+        try:
+            setup = parse_account_setup(text)
+        except OnboardingParseError:
+            return DispatchResult(
+                reply=INVALID_ACCOUNT_SETUP,
+                conversation=conversation,
+            )
+        if setup.balance is None:
+            remember_primary_account_name(
+                identity=identity,
+                account_name=setup.name,
+            )
+            return DispatchResult(
+                reply=balance_prompt(setup.name),
+                conversation=conversation,
+            )
+        primary = complete_account_onboarding(
+            identity=identity,
+            account_name=setup.name,
+            balance=setup.balance,
+        )
+        return DispatchResult(
+            reply=onboarding_complete(
+                primary.name,
+                primary.currency,
+                setup.balance,
+            ),
+            conversation=conversation,
+        )
+
+    if identity.onboarding_step == TelegramOnboardingStep.AWAITING_BALANCE:
+        try:
+            balance = parse_balance(text)
+        except OnboardingParseError:
+            return DispatchResult(
+                reply=INVALID_BALANCE,
+                conversation=conversation,
+            )
+        primary = complete_account_onboarding(
+            identity=identity,
+            account_name=identity.pending_account_name,
+            balance=balance,
+        )
+        return DispatchResult(
+            reply=onboarding_complete(
+                primary.name,
+                primary.currency,
+                balance,
+            ),
+            conversation=conversation,
+        )
+
+    raise TelegramUpdateProcessingError("invalid_onboarding_state")
 
 
 def _private_chat_id(parsed: ParsedUpdate) -> int | None:
@@ -313,6 +392,13 @@ def handle_message(message: dict) -> DispatchResult:
             conversation=conversation,
             content=text,
         )
+
+        if identity.onboarding_step != TelegramOnboardingStep.COMPLETED:
+            return _handle_onboarding_message(
+                identity=identity,
+                text=normalized_text,
+                conversation=conversation,
+            )
 
         try:
             extraction = extract_transaction_from_text(normalized_text)

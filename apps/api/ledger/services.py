@@ -1,16 +1,19 @@
+from dataclasses import dataclass
 from decimal import Decimal
 
-from dataclasses import dataclass
-
 from django.db import IntegrityError, transaction as db_transaction
+from django.db.models import Q, Sum
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from .models import (
     Account,
     AccountSystemRole,
     AccountType,
+    Entry,
     EntrySide,
     Transaction,
+    TransactionSource,
     TransactionStatus,
 )
 
@@ -20,6 +23,7 @@ class DefaultAccounts:
     primary: Account
     general_expense: Account
     general_income: Account
+    opening_balance: Account
 
 
 _DEFAULT_ACCOUNT_SPECS = (
@@ -33,6 +37,11 @@ _DEFAULT_ACCOUNT_SPECS = (
         AccountSystemRole.GENERAL_INCOME,
         "Receitas gerais",
         AccountType.INCOME,
+    ),
+    (
+        AccountSystemRole.OPENING_BALANCE,
+        "Patrimônio inicial",
+        AccountType.EQUITY,
     ),
 )
 
@@ -74,7 +83,91 @@ def ensure_default_accounts(*, user) -> DefaultAccounts:
         primary=accounts[AccountSystemRole.PRIMARY],
         general_expense=accounts[AccountSystemRole.GENERAL_EXPENSE],
         general_income=accounts[AccountSystemRole.GENERAL_INCOME],
+        opening_balance=accounts[AccountSystemRole.OPENING_BALANCE],
     )
+
+
+class OpeningBalanceError(Exception):
+    pass
+
+
+@db_transaction.atomic
+def record_opening_balance(
+    *, account: Account, balance: Decimal, occurred_at=None
+) -> Transaction:
+    locked_account = Account.objects.select_for_update().select_related("user").get(
+        pk=account.pk
+    )
+    if locked_account.opening_balance_transaction_id is not None:
+        raise OpeningBalanceError("Opening balance has already been recorded.")
+    if locked_account.account_type != AccountType.ASSET:
+        raise OpeningBalanceError("Opening balances currently require an asset account.")
+
+    defaults = ensure_default_accounts(user=locked_account.user)
+    equity_account = defaults.opening_balance
+    if locked_account.currency != equity_account.currency:
+        raise OpeningBalanceError("Opening balance accounts must use the same currency.")
+
+    transaction = Transaction.objects.create(
+        user=locked_account.user,
+        description=f"Saldo inicial — {locked_account.name}",
+        currency=locked_account.currency,
+        occurred_at=occurred_at or timezone.now(),
+        source=TransactionSource.MANUAL,
+    )
+    current_balance = calculate_account_balance(account=locked_account)
+    adjustment = balance - current_balance
+    amount = abs(adjustment)
+    if amount > 0:
+        if adjustment > 0:
+            account_side, equity_side = EntrySide.DEBIT, EntrySide.CREDIT
+        else:
+            account_side, equity_side = EntrySide.CREDIT, EntrySide.DEBIT
+        Entry.objects.bulk_create(
+            [
+                Entry(
+                    transaction=transaction,
+                    account=locked_account,
+                    side=account_side,
+                    amount=amount,
+                ),
+                Entry(
+                    transaction=transaction,
+                    account=equity_account,
+                    side=equity_side,
+                    amount=amount,
+                ),
+            ]
+        )
+    else:
+        # A zero balance still needs an auditable, idempotent opening marker.
+        transaction.status = TransactionStatus.POSTED
+        transaction.posted_at = timezone.now()
+        transaction.save(update_fields=["status", "posted_at", "updated_at"])
+
+    if amount > 0:
+        transaction = post_transaction(transaction=transaction)
+    locked_account.opening_balance_transaction = transaction
+    locked_account.save(
+        update_fields=["opening_balance_transaction", "updated_at"]
+    )
+    return transaction
+
+
+def calculate_account_balance(*, account: Account) -> Decimal:
+    totals = account.entries.aggregate(
+        debits=Coalesce(
+            Sum("amount", filter=Q(side=EntrySide.DEBIT)),
+            Decimal("0.00"),
+        ),
+        credits=Coalesce(
+            Sum("amount", filter=Q(side=EntrySide.CREDIT)),
+            Decimal("0.00"),
+        ),
+    )
+    if account.account_type in {AccountType.ASSET, AccountType.EXPENSE}:
+        return totals["debits"] - totals["credits"]
+    return totals["credits"] - totals["debits"]
 
 
 class TransactionPostingError(Exception):

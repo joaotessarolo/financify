@@ -20,7 +20,8 @@ from conversations.models import (
     TransactionDraft,
     TransactionDraftStatus,
 )
-from ledger.models import Transaction, TransactionSource, TransactionStatus
+from ledger.models import AccountSystemRole, Transaction, TransactionSource, TransactionStatus
+from ledger.services import calculate_account_balance
 
 from ..client import (
     TelegramAPIError,
@@ -29,11 +30,13 @@ from ..client import (
 from ..models import (
     TelegramIdentity,
     TelegramLinkToken,
+    TelegramOnboardingStep,
     TelegramUpdate,
     TelegramUpdateStatus,
     TelegramUpdateType,
 )
-from ..webhook import ERROR_REPLIES, LINK_SUCCESS_REPLY, TEXT_FORMAT_REPLY
+from ..messages import ACCOUNT_ONBOARDING_PROMPT
+from ..webhook import ERROR_REPLIES, TEXT_FORMAT_REPLY
 from .fakes import FakeTelegramClient
 
 WEBHOOK_SECRET = "test-webhook-secret"
@@ -406,14 +409,14 @@ class TelegramWebhookViewTests(APITestCase):
 
     # --- Outbound replies ---------------------------------------------------
 
-    def test_valid_start_replies_with_link_confirmation(self):
+    def test_valid_start_replies_with_onboarding_prompt(self):
         self._create_token()
 
         self._post(self._message_update())
 
         self.assertEqual(
             self.telegram.sent_messages,
-            [{"chat_id": TELEGRAM_ID, "text": LINK_SUCCESS_REPLY}],
+            [{"chat_id": TELEGRAM_ID, "text": ACCOUNT_ONBOARDING_PROMPT}],
         )
 
     def test_known_failures_reply_with_friendly_message(self):
@@ -517,12 +520,43 @@ class TelegramWebhookViewTests(APITestCase):
 
     # --- Persisted text conversations --------------------------------------
 
-    def _link_identity(self, *, user=None, telegram_id=TELEGRAM_ID):
+    def _link_identity(
+        self,
+        *,
+        user=None,
+        telegram_id=TELEGRAM_ID,
+        onboarding_step=TelegramOnboardingStep.COMPLETED,
+    ):
         return TelegramIdentity.objects.create(
             user=user or self.user,
             telegram_user_id=telegram_id,
             private_chat_id=telegram_id,
+            onboarding_step=onboarding_step,
         )
+
+    def test_onboarding_collects_account_then_balance(self):
+        identity = self._link_identity(
+            onboarding_step=TelegramOnboardingStep.AWAITING_ACCOUNT
+        )
+
+        self._post(self._message_update(update_id=5901, text="Nubank"))
+        identity.refresh_from_db()
+        self.assertEqual(
+            identity.onboarding_step,
+            TelegramOnboardingStep.AWAITING_BALANCE,
+        )
+        self.assertIn("saldo", self.telegram.sent_messages[-1]["text"].lower())
+
+        self._post(self._message_update(update_id=5902, text="50 mil"))
+        identity.refresh_from_db()
+        self.assertEqual(
+            identity.onboarding_step,
+            TelegramOnboardingStep.COMPLETED,
+        )
+        primary = self.user.accounts.get(system_role=AccountSystemRole.PRIMARY)
+        self.assertEqual(primary.name, "Nubank")
+        self.assertEqual(calculate_account_balance(account=primary), 50000)
+        self.assertIn("Conta pronta", self.telegram.sent_messages[-1]["text"])
 
     def test_linked_text_creates_conversation_and_inbound_outbound_messages(self):
         self._link_identity()

@@ -45,7 +45,7 @@ class UserRegistrationSerializerTests(TestCase):
         self.assertEqual(user.email, "user@example.com")
         self.assertNotEqual(user.password, self.valid_payload["password"])
         self.assertTrue(user.check_password(self.valid_payload["password"]))
-        self.assertEqual(user.accounts.count(), 3)
+        self.assertEqual(user.accounts.count(), 4)
         self.assertEqual(
             set(user.accounts.values_list("system_role", flat=True)),
             set(AccountSystemRole.values),

@@ -20,6 +20,7 @@ class AccountSystemRole(models.TextChoices):
     PRIMARY = "PRIMARY", "Primary"
     GENERAL_EXPENSE = "GENERAL_EXPENSE", "General expense"
     GENERAL_INCOME = "GENERAL_INCOME", "General income"
+    OPENING_BALANCE = "OPENING_BALANCE", "Opening balance"
 
 
 class TransactionStatus(models.TextChoices):
@@ -71,6 +72,13 @@ class Account(models.Model):
     is_active = models.BooleanField(
         default=True,
     )
+    opening_balance_transaction = models.OneToOneField(
+        "Transaction",
+        on_delete=models.PROTECT,
+        related_name="opened_account",
+        null=True,
+        blank=True,
+    )
     created_at = models.DateTimeField(
         auto_now_add=True,
     )
@@ -109,6 +117,10 @@ class Account(models.Model):
                     | models.Q(
                         system_role=AccountSystemRole.GENERAL_INCOME,
                         account_type=AccountType.INCOME,
+                    )
+                    | models.Q(
+                        system_role=AccountSystemRole.OPENING_BALANCE,
+                        account_type=AccountType.EQUITY,
                     )
                 ),
                 name="ledger_account_system_role_type_consistency",

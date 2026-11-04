@@ -36,7 +36,7 @@ class EnsureDefaultAccountsServiceTests(TestCase):
     def test_creates_three_default_accounts_in_user_currency(self):
         result = ensure_default_accounts(user=self.user)
 
-        self.assertEqual(self.user.accounts.count(), 3)
+        self.assertEqual(self.user.accounts.count(), 4)
         self.assertEqual(result.primary.system_role, AccountSystemRole.PRIMARY)
         self.assertEqual(result.primary.account_type, AccountType.ASSET)
         self.assertEqual(
@@ -50,6 +50,11 @@ class EnsureDefaultAccountsServiceTests(TestCase):
         )
         self.assertEqual(result.general_income.account_type, AccountType.INCOME)
         self.assertEqual(
+            result.opening_balance.system_role,
+            AccountSystemRole.OPENING_BALANCE,
+        )
+        self.assertEqual(result.opening_balance.account_type, AccountType.EQUITY)
+        self.assertEqual(
             set(self.user.accounts.values_list("currency", flat=True)),
             {Currency.USD},
         )
@@ -61,7 +66,7 @@ class EnsureDefaultAccountsServiceTests(TestCase):
 
         second = ensure_default_accounts(user=self.user)
 
-        self.assertEqual(self.user.accounts.count(), 3)
+        self.assertEqual(self.user.accounts.count(), 4)
         self.assertEqual(second.primary.id, first.primary.id)
         self.assertEqual(second.primary.name, "Minha carteira")
 
@@ -97,7 +102,7 @@ class EnsureDefaultAccountsConcurrencyTests(TransactionTestCase):
         with ThreadPoolExecutor(max_workers=2) as executor:
             results = list(executor.map(lambda _: worker(), range(2)))
 
-        self.assertEqual(Account.objects.count(), 3)
+        self.assertEqual(Account.objects.count(), 4)
         self.assertEqual(results[0].primary.id, results[1].primary.id)
 
 
