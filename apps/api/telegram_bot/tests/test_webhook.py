@@ -18,7 +18,9 @@ from conversations.models import (
     MessageStatus,
     MessageType,
     TransactionDraft,
+    TransactionDraftStatus,
 )
+from ledger.models import Transaction, TransactionSource, TransactionStatus
 
 from ..client import (
     TelegramAPIError,
@@ -87,6 +89,29 @@ class TelegramWebhookViewTests(APITestCase):
                 "chat": {"id": chat_id, "type": chat_type},
                 "from": {"id": from_id, "is_bot": False, "first_name": "Ana"},
                 "text": text,
+            },
+        }
+
+    def _callback_update(
+        self,
+        *,
+        draft,
+        action="confirm",
+        update_id=7001,
+        callback_id="callback-1",
+        chat_id=TELEGRAM_ID,
+        from_id=TELEGRAM_ID,
+    ):
+        return {
+            "update_id": update_id,
+            "callback_query": {
+                "id": callback_id,
+                "from": {"id": from_id, "is_bot": False},
+                "message": {
+                    "message_id": 10,
+                    "chat": {"id": chat_id, "type": "private"},
+                },
+                "data": f"draft:{action}:{draft.id}",
             },
         }
 
@@ -345,7 +370,7 @@ class TelegramWebhookViewTests(APITestCase):
         update = TelegramUpdate.objects.get()
         self.assertEqual(update.error_code, "unsupported_command")
 
-    def test_callback_query_is_recorded_as_unsupported_for_now(self):
+    def test_malformed_callback_query_is_recorded_as_failed(self):
         response = self._post(
             {"update_id": 3000, "callback_query": {"id": "abc", "data": "x"}}
         )
@@ -354,7 +379,7 @@ class TelegramWebhookViewTests(APITestCase):
         update = TelegramUpdate.objects.get()
         self.assertEqual(update.update_type, TelegramUpdateType.CALLBACK_QUERY)
         self.assertEqual(update.status, TelegramUpdateStatus.FAILED)
-        self.assertEqual(update.error_code, "unsupported_update_type")
+        self.assertEqual(update.error_code, "malformed_callback_query")
 
     def test_unknown_update_kind_is_recorded_as_unsupported(self):
         response = self._post({"update_id": 3001, "edited_message": {}})
@@ -533,6 +558,15 @@ class TelegramWebhookViewTests(APITestCase):
         self.assertEqual(str(draft.currency), "BRL")
         self.assertEqual(draft.entries.count(), 2)
         self.assertIsNone(draft.transaction)
+        preview = self.telegram.sent_messages[-1]
+        buttons = preview["reply_markup"]["inline_keyboard"][0]
+        self.assertEqual([button["text"] for button in buttons], ["Confirmar", "Cancelar"])
+        self.assertEqual(
+            buttons[0]["callback_data"], f"draft:confirm:{draft.id}"
+        )
+        self.assertEqual(
+            buttons[1]["callback_data"], f"draft:cancel:{draft.id}"
+        )
 
     def test_natural_income_form_creates_draft(self):
         self._link_identity()
@@ -641,3 +675,105 @@ class TelegramWebhookViewTests(APITestCase):
 
         self.assertEqual(Conversation.objects.count(), 0)
         self.assertEqual(Message.objects.count(), 0)
+
+    # --- Draft callbacks ----------------------------------------------------
+
+    def test_confirm_callback_posts_draft_and_answers_callback(self):
+        self._link_identity()
+        self._post(
+            self._message_update(
+                update_id=7000,
+                text="gastei 35,90 no almoço",
+            )
+        )
+        draft = TransactionDraft.objects.get()
+
+        response = self._post(self._callback_update(draft=draft))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        draft.refresh_from_db()
+        self.assertEqual(draft.status, TransactionDraftStatus.CONFIRMED)
+        self.assertIsNotNone(draft.resolved_at)
+        transaction = Transaction.objects.get()
+        self.assertEqual(transaction, draft.transaction)
+        self.assertEqual(transaction.status, TransactionStatus.POSTED)
+        self.assertEqual(transaction.source, TransactionSource.ASSISTANT)
+        self.assertEqual(transaction.entries.count(), 2)
+        self.assertEqual(
+            self.telegram.answered_callbacks[-1],
+            {
+                "callback_query_id": "callback-1",
+                "text": "Registro confirmado.",
+            },
+        )
+        self.assertIn("Registro confirmado", self.telegram.sent_messages[-1]["text"])
+        callback_update = TelegramUpdate.objects.get(update_id=7001)
+        self.assertEqual(callback_update.status, TelegramUpdateStatus.COMPLETED)
+
+    def test_cancel_callback_rejects_draft_without_ledger_transaction(self):
+        self._link_identity()
+        self._post(
+            self._message_update(update_id=7010, text="receita de 2500 salário")
+        )
+        draft = TransactionDraft.objects.get()
+
+        self._post(
+            self._callback_update(
+                draft=draft,
+                action="cancel",
+                update_id=7011,
+                callback_id="callback-cancel",
+            )
+        )
+
+        draft.refresh_from_db()
+        self.assertEqual(draft.status, TransactionDraftStatus.REJECTED)
+        self.assertIsNotNone(draft.resolved_at)
+        self.assertEqual(Transaction.objects.count(), 0)
+        self.assertEqual(
+            self.telegram.answered_callbacks[-1]["text"],
+            "Rascunho cancelado.",
+        )
+
+    def test_other_linked_user_cannot_confirm_draft(self):
+        self._link_identity(user=self.user, telegram_id=111111111)
+        self._link_identity(user=self.other_user, telegram_id=222222222)
+        self._post(
+            self._message_update(
+                update_id=7020,
+                text="gasto 10 café",
+                chat_id=111111111,
+                from_id=111111111,
+            )
+        )
+        draft = TransactionDraft.objects.get()
+
+        self._post(
+            self._callback_update(
+                draft=draft,
+                update_id=7021,
+                callback_id="callback-other",
+                chat_id=222222222,
+                from_id=222222222,
+            )
+        )
+
+        draft.refresh_from_db()
+        self.assertEqual(draft.status, TransactionDraftStatus.PENDING)
+        self.assertEqual(Transaction.objects.count(), 0)
+        self.assertEqual(
+            self.telegram.answered_callbacks[-1]["text"],
+            "Rascunho não encontrado.",
+        )
+
+    def test_duplicate_callback_update_does_not_post_twice(self):
+        self._link_identity()
+        self._post(self._message_update(update_id=7030, text="gasto 10 café"))
+        draft = TransactionDraft.objects.get()
+        callback = self._callback_update(draft=draft, update_id=7031)
+
+        self._post(callback)
+        self._post(callback)
+
+        self.assertEqual(Transaction.objects.count(), 1)
+        self.assertEqual(len(self.telegram.answered_callbacks), 1)

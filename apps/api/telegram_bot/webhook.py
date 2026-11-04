@@ -11,21 +11,30 @@ Ordinary text from linked users is stored in the conversation history.
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
+import uuid
 
 from django.core.exceptions import ImproperlyConfigured
 from django.db import IntegrityError, transaction as db_transaction
 from django.utils import timezone
 
-from conversations.models import Conversation, ConversationChannel
+from conversations.models import (
+    Conversation,
+    ConversationChannel,
+    TransactionDraft,
+)
 from conversations.extraction import (
     TextExtractionError,
     extract_transaction_from_text,
 )
 from conversations.services import (
     create_transaction_draft_from_extraction,
+    DraftConfirmationError,
+    DraftRejectionError,
+    confirm_transaction_draft,
     get_or_create_active_conversation,
     record_completed_inbound_text_message,
     record_completed_outbound_text_message,
+    reject_transaction_draft,
 )
 
 from .client import TelegramClient, TelegramClientError, get_telegram_client
@@ -118,14 +127,34 @@ class ParsedUpdate:
 class DispatchResult:
     reply: str | None = None
     conversation: Conversation | None = None
+    reply_markup: dict | None = None
+    callback_query_id: str | None = None
+    callback_answer: str = ""
 
 
 def _draft_reply(*, description: str, amount, currency: str) -> str:
     formatted_amount = f"{amount:.2f}".replace(".", ",")
     return (
         f"Rascunho criado: {description} — {currency} {formatted_amount}. "
-        "Revise os dados; a confirmação será habilitada no próximo passo."
+        "Revise os dados e confirme ou cancele abaixo."
     )
+
+
+def _draft_reply_markup(draft_id) -> dict:
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "Confirmar",
+                    "callback_data": f"draft:confirm:{draft_id}",
+                },
+                {
+                    "text": "Cancelar",
+                    "callback_data": f"draft:cancel:{draft_id}",
+                },
+            ]
+        ]
+    }
 
 
 def _is_positive_int(value) -> bool:
@@ -224,9 +253,16 @@ def handle_start_command(
 
 def _private_chat_id(parsed: ParsedUpdate) -> int | None:
     """Chat to reply to, only for well-formed private-chat messages."""
-    if parsed.update_type != TelegramUpdateType.MESSAGE:
+    if parsed.update_type == TelegramUpdateType.MESSAGE:
+        container = parsed.payload["message"]
+    elif parsed.update_type == TelegramUpdateType.CALLBACK_QUERY:
+        callback = parsed.payload["callback_query"]
+        container = callback.get("message") if isinstance(callback, dict) else None
+        if not isinstance(container, dict):
+            return None
+    else:
         return None
-    chat = parsed.payload["message"].get("chat")
+    chat = container.get("chat")
     if not isinstance(chat, dict) or chat.get("type") != "private":
         return None
     chat_id = chat.get("id")
@@ -295,6 +331,7 @@ def handle_message(message: dict) -> DispatchResult:
                 currency=draft.currency,
             ),
             conversation=conversation,
+            reply_markup=_draft_reply_markup(draft.id),
         )
 
     command, argument = _parse_command(normalized_text)
@@ -306,9 +343,104 @@ def handle_message(message: dict) -> DispatchResult:
     raise TelegramUpdateProcessingError("unsupported_command")
 
 
+def handle_callback_query(callback: dict) -> DispatchResult:
+    callback_id = callback.get("id")
+    sender = callback.get("from")
+    message = callback.get("message")
+    data = callback.get("data")
+    if (
+        not isinstance(callback_id, str)
+        or not callback_id
+        or not isinstance(sender, dict)
+        or not isinstance(message, dict)
+        or not isinstance(data, str)
+    ):
+        raise TelegramUpdateProcessingError("malformed_callback_query")
+
+    chat = message.get("chat")
+    if not isinstance(chat, dict) or chat.get("type") != "private":
+        raise TelegramUpdateProcessingError("non_private_chat")
+    chat_id = chat.get("id")
+    from_id = sender.get("id")
+    if not _is_positive_int(chat_id) or not _is_positive_int(from_id):
+        raise TelegramUpdateProcessingError("malformed_callback_query")
+
+    identity = TelegramIdentity.objects.filter(
+        telegram_user_id=from_id,
+        private_chat_id=chat_id,
+        revoked_at__isnull=True,
+    ).first()
+    if identity is None:
+        return DispatchResult(
+            reply=ERROR_REPLIES["telegram_not_linked"],
+            callback_query_id=callback_id,
+            callback_answer="Conta não conectada.",
+        )
+
+    parts = data.split(":")
+    if len(parts) != 3 or parts[0] != "draft" or parts[1] not in {
+        "confirm",
+        "cancel",
+    }:
+        return DispatchResult(
+            reply="Esta ação não é válida.",
+            callback_query_id=callback_id,
+            callback_answer="Ação inválida.",
+        )
+    try:
+        draft_id = uuid.UUID(parts[2])
+    except ValueError:
+        return DispatchResult(
+            reply="Esta ação não é válida.",
+            callback_query_id=callback_id,
+            callback_answer="Ação inválida.",
+        )
+
+    draft = (
+        TransactionDraft.objects.select_related("source_message__conversation")
+        .filter(pk=draft_id, user_id=identity.user_id)
+        .first()
+    )
+    if draft is None:
+        return DispatchResult(
+            reply="Este rascunho não foi encontrado.",
+            callback_query_id=callback_id,
+            callback_answer="Rascunho não encontrado.",
+        )
+
+    conversation = draft.source_message.conversation
+    if parts[1] == "confirm":
+        try:
+            transaction = confirm_transaction_draft(draft=draft)
+        except DraftConfirmationError:
+            reply = "Este rascunho não pode mais ser confirmado."
+            answer = "Não foi possível confirmar."
+        else:
+            reply = f"Registro confirmado: {transaction.description}."
+            answer = "Registro confirmado."
+    else:
+        try:
+            reject_transaction_draft(draft=draft)
+        except DraftRejectionError:
+            reply = "Este rascunho não pode mais ser cancelado."
+            answer = "Não foi possível cancelar."
+        else:
+            reply = f"Rascunho cancelado: {draft.description}."
+            answer = "Rascunho cancelado."
+
+    return DispatchResult(
+        reply=reply,
+        conversation=conversation,
+        callback_query_id=callback_id,
+        callback_answer=answer,
+    )
+
+
 def dispatch(parsed: ParsedUpdate) -> DispatchResult:
     if parsed.update_type == TelegramUpdateType.MESSAGE:
         return handle_message(parsed.payload["message"])
+    if parsed.update_type == TelegramUpdateType.CALLBACK_QUERY:
+        return handle_callback_query(parsed.payload["callback_query"])
     raise TelegramUpdateProcessingError("unsupported_update_type")
 
 
@@ -318,12 +450,17 @@ def _send_reply(
     update_id: int,
     chat_id: int,
     text: str,
+    reply_markup: dict | None = None,
 ) -> bool:
     """Best-effort reply. Return whether Telegram accepted the message."""
     try:
         if client is None:
             client = get_telegram_client()
-        client.send_message(chat_id=chat_id, text=text)
+        client.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_markup=reply_markup,
+        )
         return True
     except ImproperlyConfigured:
         logger.warning(
@@ -345,6 +482,33 @@ def _send_reply(
             update_id,
         )
         return False
+
+
+def _answer_callback(
+    client: TelegramClient | None,
+    *,
+    update_id: int,
+    callback_query_id: str,
+    text: str,
+) -> TelegramClient | None:
+    try:
+        if client is None:
+            client = get_telegram_client()
+        client.answer_callback_query(
+            callback_query_id=callback_query_id,
+            text=text,
+        )
+    except (ImproperlyConfigured, TelegramClientError):
+        logger.warning(
+            "Failed to answer callback for Telegram update %s.",
+            update_id,
+        )
+    except Exception:
+        logger.error(
+            "Unexpected error answering callback for Telegram update %s.",
+            update_id,
+        )
+    return client
 
 
 def process_update(payload, *, client: TelegramClient | None = None) -> bool:
@@ -377,12 +541,20 @@ def process_update(payload, *, client: TelegramClient | None = None) -> bool:
         _finish_update(update)
 
     chat_id = _private_chat_id(parsed)
+    if result.callback_query_id:
+        client = _answer_callback(
+            client,
+            update_id=parsed.update_id,
+            callback_query_id=result.callback_query_id,
+            text=result.callback_answer,
+        )
     if result.reply and chat_id is not None:
         sent = _send_reply(
             client,
             update_id=parsed.update_id,
             chat_id=chat_id,
             text=result.reply,
+            reply_markup=result.reply_markup,
         )
         if sent and result.conversation is not None:
             try:

@@ -179,6 +179,43 @@ class DraftExpiredError(DraftConfirmationError):
     pass
 
 
+class DraftRejectionError(Exception):
+    pass
+
+
+def reject_transaction_draft(*, draft: TransactionDraft) -> TransactionDraft:
+    expired = False
+    with db_transaction.atomic():
+        locked_draft = TransactionDraft.objects.select_for_update().get(
+            pk=draft.pk
+        )
+        if locked_draft.status == TransactionDraftStatus.REJECTED:
+            return locked_draft
+        if locked_draft.status != TransactionDraftStatus.PENDING:
+            raise DraftRejectionError(
+                "Only pending transaction drafts can be rejected."
+            )
+
+        now = timezone.now()
+        if locked_draft.expires_at <= now:
+            locked_draft.status = TransactionDraftStatus.EXPIRED
+            locked_draft.resolved_at = now
+            locked_draft.save(
+                update_fields=["status", "resolved_at", "updated_at"]
+            )
+            expired = True
+        else:
+            locked_draft.status = TransactionDraftStatus.REJECTED
+            locked_draft.resolved_at = now
+            locked_draft.save(
+                update_fields=["status", "resolved_at", "updated_at"]
+            )
+            return locked_draft
+
+    if expired:
+        raise DraftRejectionError("Transaction draft has expired.")
+
+
 def confirm_transaction_draft(
     *,
     draft: TransactionDraft,

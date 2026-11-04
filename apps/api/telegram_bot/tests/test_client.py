@@ -86,6 +86,38 @@ class HttpTelegramClientTests(SimpleTestCase):
         sent = json.loads(mock_urlopen.call_args.args[0].data)
         self.assertEqual(len(sent["text"]), 4096)
 
+    def test_send_message_includes_inline_reply_markup(self):
+        markup = {
+            "inline_keyboard": [
+                [{"text": "Confirmar", "callback_data": "draft:confirm:1"}]
+            ]
+        }
+        with patch(
+            URLOPEN,
+            return_value=_response({"ok": True, "result": {"message_id": 1}}),
+        ) as mock_urlopen:
+            self.client.send_message(chat_id=1, text="Rascunho", reply_markup=markup)
+
+        sent = json.loads(mock_urlopen.call_args.args[0].data)
+        self.assertEqual(sent["reply_markup"], markup)
+
+    def test_answer_callback_query_posts_callback_id(self):
+        with patch(
+            URLOPEN,
+            return_value=_response({"ok": True, "result": True}),
+        ) as mock_urlopen:
+            self.client.answer_callback_query(
+                callback_query_id="callback-1",
+                text="Confirmado",
+            )
+
+        request = mock_urlopen.call_args.args[0]
+        self.assertTrue(request.full_url.endswith("/answerCallbackQuery"))
+        self.assertEqual(
+            json.loads(request.data),
+            {"callback_query_id": "callback-1", "text": "Confirmado"},
+        )
+
     def test_empty_text_is_rejected_without_request(self):
         with patch(URLOPEN) as mock_urlopen:
             with self.assertRaises(ValueError):

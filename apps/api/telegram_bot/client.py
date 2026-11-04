@@ -42,8 +42,20 @@ class TelegramInvalidResponseError(TelegramClientError):
 
 
 class TelegramClient(Protocol):
-    def send_message(self, *, chat_id: int, text: str) -> int:
+    def send_message(
+        self,
+        *,
+        chat_id: int,
+        text: str,
+        reply_markup: dict | None = None,
+    ) -> int:
         """Send a text message and return Telegram's message_id."""
+        ...
+
+    def answer_callback_query(
+        self, *, callback_query_id: str, text: str = ""
+    ) -> None:
+        """Acknowledge a callback query and remove Telegram's loading state."""
         ...
 
 
@@ -68,19 +80,35 @@ class HttpTelegramClient:
     def __repr__(self) -> str:
         return f"HttpTelegramClient(timeout_seconds={self._timeout_seconds})"
 
-    def send_message(self, *, chat_id: int, text: str) -> int:
+    def send_message(
+        self,
+        *,
+        chat_id: int,
+        text: str,
+        reply_markup: dict | None = None,
+    ) -> int:
         if not text:
             raise ValueError("text must not be empty.")
-        result = self._call(
-            "sendMessage",
-            {"chat_id": chat_id, "text": text[:MAX_MESSAGE_LENGTH]},
-        )
+        params = {"chat_id": chat_id, "text": text[:MAX_MESSAGE_LENGTH]}
+        if reply_markup is not None:
+            params["reply_markup"] = reply_markup
+        result = self._call("sendMessage", params)
         message_id = result.get("message_id") if isinstance(result, dict) else None
         if isinstance(message_id, bool) or not isinstance(message_id, int):
             raise TelegramInvalidResponseError(
                 "Telegram sendMessage response has no message_id."
             )
         return message_id
+
+    def answer_callback_query(
+        self, *, callback_query_id: str, text: str = ""
+    ) -> None:
+        if not callback_query_id:
+            raise ValueError("callback_query_id must not be empty.")
+        params = {"callback_query_id": callback_query_id}
+        if text:
+            params["text"] = text
+        self._call("answerCallbackQuery", params)
 
     def _call(self, method: str, params: dict):
         request = urllib.request.Request(
