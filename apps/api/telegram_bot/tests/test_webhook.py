@@ -17,6 +17,7 @@ from conversations.models import (
     MessageDirection,
     MessageStatus,
     MessageType,
+    TransactionDraft,
 )
 
 from ..client import (
@@ -30,7 +31,7 @@ from ..models import (
     TelegramUpdateStatus,
     TelegramUpdateType,
 )
-from ..webhook import ERROR_REPLIES, LINK_SUCCESS_REPLY, TEXT_MESSAGE_REPLY
+from ..webhook import ERROR_REPLIES, LINK_SUCCESS_REPLY, TEXT_FORMAT_REPLY
 from .fakes import FakeTelegramClient
 
 WEBHOOK_SECRET = "test-webhook-secret"
@@ -523,8 +524,24 @@ class TelegramWebhookViewTests(APITestCase):
         self.assertEqual(outbound.direction, MessageDirection.OUTBOUND)
         self.assertEqual(outbound.message_type, MessageType.TEXT)
         self.assertEqual(outbound.status, MessageStatus.COMPLETED)
-        self.assertEqual(outbound.content, TEXT_MESSAGE_REPLY)
+        self.assertIn("Rascunho criado:", outbound.content)
         self.assertIsNotNone(outbound.processed_at)
+
+        draft = TransactionDraft.objects.get()
+        self.assertEqual(draft.source_message, inbound)
+        self.assertEqual(draft.description, "no almoço")
+        self.assertEqual(str(draft.currency), "BRL")
+        self.assertEqual(draft.entries.count(), 2)
+        self.assertIsNone(draft.transaction)
+
+    def test_natural_income_form_creates_draft(self):
+        self._link_identity()
+
+        self._post(self._message_update(update_id=6000, text="ganho de 2500"))
+
+        draft = TransactionDraft.objects.get()
+        self.assertEqual(draft.description, "Receita")
+        self.assertEqual(draft.entries.count(), 2)
 
     def test_subsequent_text_reuses_active_conversation(self):
         self._link_identity()
@@ -534,6 +551,15 @@ class TelegramWebhookViewTests(APITestCase):
 
         self.assertEqual(Conversation.objects.count(), 1)
         self.assertEqual(Message.objects.count(), 4)
+        self.assertEqual(TransactionDraft.objects.count(), 0)
+        self.assertEqual(
+            set(
+                Message.objects.filter(
+                    direction=MessageDirection.OUTBOUND
+                ).values_list("content", flat=True)
+            ),
+            {TEXT_FORMAT_REPLY},
+        )
 
     def test_duplicate_update_does_not_duplicate_conversation_messages(self):
         self._link_identity()

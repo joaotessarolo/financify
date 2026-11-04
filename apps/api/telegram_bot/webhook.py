@@ -9,6 +9,7 @@ Ordinary text from linked users is stored in the conversation history.
 """
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 import logging
 
 from django.core.exceptions import ImproperlyConfigured
@@ -16,7 +17,12 @@ from django.db import IntegrityError, transaction as db_transaction
 from django.utils import timezone
 
 from conversations.models import Conversation, ConversationChannel
+from conversations.extraction import (
+    TextExtractionError,
+    extract_transaction_from_text,
+)
 from conversations.services import (
+    create_transaction_draft_from_extraction,
     get_or_create_active_conversation,
     record_completed_inbound_text_message,
     record_completed_outbound_text_message,
@@ -49,9 +55,9 @@ LINK_SUCCESS_REPLY = (
     "Agora você pode registrar seus gastos por aqui."
 )
 
-TEXT_MESSAGE_REPLY = (
-    "Recebi sua mensagem. O registro financeiro por texto será habilitado "
-    "no próximo passo."
+TEXT_FORMAT_REPLY = (
+    "Não consegui criar o rascunho. Use algo como “gastei 35,90 no almoço” "
+    "ou “receita de 2500 salário”."
 )
 
 # Safe, user-facing replies for known failures. Codes absent from this map
@@ -112,6 +118,14 @@ class ParsedUpdate:
 class DispatchResult:
     reply: str | None = None
     conversation: Conversation | None = None
+
+
+def _draft_reply(*, description: str, amount, currency: str) -> str:
+    formatted_amount = f"{amount:.2f}".replace(".", ",")
+    return (
+        f"Rascunho criado: {description} — {currency} {formatted_amount}. "
+        "Revise os dados; a confirmação será habilitada no próximo passo."
+    )
 
 
 def _is_positive_int(value) -> bool:
@@ -239,6 +253,11 @@ def handle_message(message: dict) -> DispatchResult:
 
     normalized_text = text.strip()
     if not normalized_text.startswith("/"):
+        message_date = message.get("date")
+        if not _is_positive_int(message_date):
+            raise TelegramUpdateProcessingError("malformed_message")
+        occurred_at = datetime.fromtimestamp(message_date, tz=UTC)
+
         identity = TelegramIdentity.objects.select_related("user").filter(
             telegram_user_id=from_id,
             private_chat_id=chat_id,
@@ -251,12 +270,30 @@ def handle_message(message: dict) -> DispatchResult:
             user=identity.user,
             channel=ConversationChannel.TELEGRAM,
         )
-        record_completed_inbound_text_message(
+        source_message = record_completed_inbound_text_message(
             conversation=conversation,
             content=text,
         )
+
+        try:
+            extraction = extract_transaction_from_text(normalized_text)
+        except TextExtractionError:
+            return DispatchResult(
+                reply=TEXT_FORMAT_REPLY,
+                conversation=conversation,
+            )
+
+        draft = create_transaction_draft_from_extraction(
+            source_message=source_message,
+            extraction=extraction,
+            occurred_at=occurred_at,
+        )
         return DispatchResult(
-            reply=TEXT_MESSAGE_REPLY,
+            reply=_draft_reply(
+                description=draft.description,
+                amount=extraction.amount,
+                currency=draft.currency,
+            ),
             conversation=conversation,
         )
 

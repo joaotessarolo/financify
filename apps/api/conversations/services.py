@@ -1,12 +1,29 @@
+from datetime import datetime, timedelta
+
+from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.db import IntegrityError, transaction as db_transaction
 from django.utils import timezone
 
-from ledger.models import Entry, Transaction, TransactionSource, TransactionStatus
-from ledger.services import TransactionPostingError, post_transaction
+from ledger.models import (
+    AccountSystemRole,
+    Entry,
+    EntrySide,
+    Transaction,
+    TransactionSource,
+    TransactionStatus,
+)
+from ledger.services import (
+    TransactionPostingError,
+    ensure_default_accounts,
+    post_transaction,
+)
 
+from .extraction import ExtractedTransaction, TransactionKind
 from .models import (
     Conversation,
     ConversationStatus,
+    DraftEntry,
     Message,
     MessageDirection,
     MessageStatus,
@@ -76,6 +93,82 @@ def record_completed_outbound_text_message(
         direction=MessageDirection.OUTBOUND,
         content=content,
     )
+
+
+class DefaultAccountConfigurationError(Exception):
+    pass
+
+
+@db_transaction.atomic
+def create_transaction_draft_from_extraction(
+    *,
+    source_message: Message,
+    extraction: ExtractedTransaction,
+    occurred_at: datetime,
+) -> TransactionDraft:
+    user = source_message.conversation.user
+    ttl_seconds = settings.TRANSACTION_DRAFT_TTL_SECONDS
+    if ttl_seconds <= 0:
+        raise ImproperlyConfigured(
+            "TRANSACTION_DRAFT_TTL_SECONDS must be greater than zero."
+        )
+    ensure_default_accounts(user=user)
+    accounts = {
+        account.system_role: account
+        for account in user.accounts.filter(
+            system_role__in=AccountSystemRole.values,
+            is_active=True,
+        )
+    }
+    required_roles = {
+        AccountSystemRole.PRIMARY,
+        AccountSystemRole.GENERAL_EXPENSE,
+        AccountSystemRole.GENERAL_INCOME,
+    }
+    if accounts.keys() < required_roles:
+        raise DefaultAccountConfigurationError(
+            "User does not have all active default accounts."
+        )
+    if any(account.currency != user.currency for account in accounts.values()):
+        raise DefaultAccountConfigurationError(
+            "Default account currencies do not match the user currency."
+        )
+
+    draft = TransactionDraft.objects.create(
+        user=user,
+        source_message=source_message,
+        description=extraction.description,
+        currency=user.currency,
+        occurred_at=occurred_at,
+        expires_at=timezone.now() + timedelta(seconds=ttl_seconds),
+    )
+
+    if extraction.kind == TransactionKind.EXPENSE:
+        debit_account = accounts[AccountSystemRole.GENERAL_EXPENSE]
+        credit_account = accounts[AccountSystemRole.PRIMARY]
+    elif extraction.kind == TransactionKind.INCOME:
+        debit_account = accounts[AccountSystemRole.PRIMARY]
+        credit_account = accounts[AccountSystemRole.GENERAL_INCOME]
+    else:
+        raise ValueError("Unsupported extracted transaction kind.")
+
+    DraftEntry.objects.bulk_create(
+        [
+            DraftEntry(
+                draft=draft,
+                account=debit_account,
+                side=EntrySide.DEBIT,
+                amount=extraction.amount,
+            ),
+            DraftEntry(
+                draft=draft,
+                account=credit_account,
+                side=EntrySide.CREDIT,
+                amount=extraction.amount,
+            ),
+        ]
+    )
+    return draft
 
 
 class DraftConfirmationError(Exception):
