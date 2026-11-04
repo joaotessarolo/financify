@@ -1,7 +1,11 @@
 import uuid
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+
+from common.money import Currency
+from ledger.models import AccountSystemRole
 
 from ..serializers import UserLoginSerializer, UserRegistrationSerializer
 
@@ -41,6 +45,11 @@ class UserRegistrationSerializerTests(TestCase):
         self.assertEqual(user.email, "user@example.com")
         self.assertNotEqual(user.password, self.valid_payload["password"])
         self.assertTrue(user.check_password(self.valid_payload["password"]))
+        self.assertEqual(user.accounts.count(), 3)
+        self.assertEqual(
+            set(user.accounts.values_list("system_role", flat=True)),
+            set(AccountSystemRole.values),
+        )
 
     def test_passwords_are_not_in_serialized_output(self):
         """Test password and password_confirmation are omitted from serializer.data."""
@@ -52,6 +61,19 @@ class UserRegistrationSerializerTests(TestCase):
         self.assertNotIn("password_confirmation", serializer.data)
         self.assertIn("id", serializer.data)
         self.assertEqual(serializer.data["email"], "user@example.com")
+
+    def test_account_creation_failure_rolls_back_user_registration(self):
+        serializer = UserRegistrationSerializer(data=self.valid_payload)
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+        with patch(
+            "users.serializers.ensure_default_accounts",
+            side_effect=RuntimeError("account setup failed"),
+        ):
+            with self.assertRaises(RuntimeError):
+                serializer.save()
+
+        self.assertEqual(self.user_model.objects.count(), 0)
 
     def test_mismatched_passwords_are_rejected(self):
         """Test registration fails when password and password_confirmation differ."""
@@ -158,6 +180,10 @@ class UserRegistrationSerializerTests(TestCase):
         self.assertEqual(serializer.data["last_name"], "Silva")
         self.assertEqual(serializer.data["currency"], "USD")
         self.assertEqual(serializer.data["timezone"], "Europe/Lisbon")
+        self.assertEqual(
+            set(user.accounts.values_list("currency", flat=True)),
+            {Currency.USD},
+        )
 
     def test_unsupported_currency_is_rejected(self):
         payload = {

@@ -1,7 +1,10 @@
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
+from django.db import transaction
 from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
+
+from ledger.services import ensure_default_accounts
 
 from .models import User
 
@@ -49,7 +52,10 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         validated_data.pop("password_confirmation")
-        return User.objects.create_user(**validated_data)
+        with transaction.atomic():
+            user = User.objects.create_user(**validated_data)
+            ensure_default_accounts(user=user)
+        return user
 
 
 class UserLoginSerializer(serializers.Serializer):

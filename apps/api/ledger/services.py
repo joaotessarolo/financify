@@ -1,9 +1,80 @@
 from decimal import Decimal
 
-from django.db import transaction as db_transaction
+from dataclasses import dataclass
+
+from django.db import IntegrityError, transaction as db_transaction
 from django.utils import timezone
 
-from .models import EntrySide, Transaction, TransactionStatus
+from .models import (
+    Account,
+    AccountSystemRole,
+    AccountType,
+    EntrySide,
+    Transaction,
+    TransactionStatus,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class DefaultAccounts:
+    primary: Account
+    general_expense: Account
+    general_income: Account
+
+
+_DEFAULT_ACCOUNT_SPECS = (
+    (AccountSystemRole.PRIMARY, "Conta principal", AccountType.ASSET),
+    (
+        AccountSystemRole.GENERAL_EXPENSE,
+        "Despesas gerais",
+        AccountType.EXPENSE,
+    ),
+    (
+        AccountSystemRole.GENERAL_INCOME,
+        "Receitas gerais",
+        AccountType.INCOME,
+    ),
+)
+
+
+def _get_or_create_default_account(
+    *, user, system_role: str, name: str, account_type: str
+) -> Account:
+    account = Account.objects.filter(
+        user=user,
+        system_role=system_role,
+    ).first()
+    if account is not None:
+        return account
+
+    try:
+        with db_transaction.atomic():
+            return Account.objects.create(
+                user=user,
+                name=name,
+                account_type=account_type,
+                currency=user.currency,
+                system_role=system_role,
+            )
+    except IntegrityError:
+        return Account.objects.get(user=user, system_role=system_role)
+
+
+def ensure_default_accounts(*, user) -> DefaultAccounts:
+    accounts = {
+        role: _get_or_create_default_account(
+            user=user,
+            system_role=role,
+            name=name,
+            account_type=account_type,
+        )
+        for role, name, account_type in _DEFAULT_ACCOUNT_SPECS
+    }
+    return DefaultAccounts(
+        primary=accounts[AccountSystemRole.PRIMARY],
+        general_expense=accounts[AccountSystemRole.GENERAL_EXPENSE],
+        general_income=accounts[AccountSystemRole.GENERAL_INCOME],
+    )
 
 
 class TransactionPostingError(Exception):

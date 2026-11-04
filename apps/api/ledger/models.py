@@ -16,6 +16,12 @@ class AccountType(models.TextChoices):
     EQUITY = "EQUITY", "Equity"
 
 
+class AccountSystemRole(models.TextChoices):
+    PRIMARY = "PRIMARY", "Primary"
+    GENERAL_EXPENSE = "GENERAL_EXPENSE", "General expense"
+    GENERAL_INCOME = "GENERAL_INCOME", "General income"
+
+
 class TransactionStatus(models.TextChoices):
     DRAFT = "DRAFT", "Draft"
     POSTED = "POSTED", "Posted"
@@ -56,6 +62,12 @@ class Account(models.Model):
         max_length=3,
         choices=Currency.choices,
     )
+    system_role = models.CharField(
+        max_length=20,
+        choices=AccountSystemRole.choices,
+        blank=True,
+        default="",
+    )
     is_active = models.BooleanField(
         default=True,
     )
@@ -75,6 +87,36 @@ class Account(models.Model):
             models.CheckConstraint(
                 condition=models.Q(currency__in=Currency.values),
                 name="ledger_account_currency_supported",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(system_role="")
+                    | models.Q(system_role__in=AccountSystemRole.values)
+                ),
+                name="ledger_account_system_role_supported",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(system_role="")
+                    | models.Q(
+                        system_role=AccountSystemRole.PRIMARY,
+                        account_type=AccountType.ASSET,
+                    )
+                    | models.Q(
+                        system_role=AccountSystemRole.GENERAL_EXPENSE,
+                        account_type=AccountType.EXPENSE,
+                    )
+                    | models.Q(
+                        system_role=AccountSystemRole.GENERAL_INCOME,
+                        account_type=AccountType.INCOME,
+                    )
+                ),
+                name="ledger_account_system_role_type_consistency",
+            ),
+            models.UniqueConstraint(
+                fields=["user", "system_role"],
+                condition=~models.Q(system_role=""),
+                name="ledger_account_unique_system_role_per_user",
             ),
         ]
 

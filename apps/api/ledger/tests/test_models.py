@@ -12,6 +12,7 @@ from common.money import Currency
 
 from ..models import (
     Account,
+    AccountSystemRole,
     AccountType,
     Entry,
     EntrySide,
@@ -68,6 +69,19 @@ class AccountModelTests(TestCase):
         )
 
         self.assertTrue(account.is_active)
+        self.assertEqual(account.system_role, "")
+
+    def test_create_valid_system_account(self):
+        account = Account.objects.create(
+            user=self.user,
+            name="Conta principal",
+            account_type=AccountType.ASSET,
+            currency=Currency.BRL,
+            system_role=AccountSystemRole.PRIMARY,
+        )
+
+        self.assertEqual(account.system_role, AccountSystemRole.PRIMARY)
+        account.full_clean()
 
     def test_user_accounts_reverse_relationship(self):
         account = Account.objects.create(
@@ -169,6 +183,62 @@ class AccountModelTests(TestCase):
         self.assertEqual(account_one.name, account_two.name)
         self.assertNotEqual(account_one.id, account_two.id)
         self.assertEqual(self.user.accounts.filter(name="Nubank").count(), 2)
+
+    def test_system_role_is_unique_per_user(self):
+        Account.objects.create(
+            user=self.user,
+            name="Principal",
+            account_type=AccountType.ASSET,
+            currency=Currency.BRL,
+            system_role=AccountSystemRole.PRIMARY,
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Account.objects.create(
+                    user=self.user,
+                    name="Outra principal",
+                    account_type=AccountType.ASSET,
+                    currency=Currency.BRL,
+                    system_role=AccountSystemRole.PRIMARY,
+                )
+
+    def test_different_users_can_have_same_system_role(self):
+        for user in (self.user, self.other_user):
+            Account.objects.create(
+                user=user,
+                name="Principal",
+                account_type=AccountType.ASSET,
+                currency=Currency.BRL,
+                system_role=AccountSystemRole.PRIMARY,
+            )
+
+        self.assertEqual(
+            Account.objects.filter(system_role=AccountSystemRole.PRIMARY).count(),
+            2,
+        )
+
+    def test_database_rejects_invalid_system_role(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Account.objects.create(
+                    user=self.user,
+                    name="Invalid",
+                    account_type=AccountType.ASSET,
+                    currency=Currency.BRL,
+                    system_role="INVALID",
+                )
+
+    def test_database_rejects_system_role_with_wrong_account_type(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Account.objects.create(
+                    user=self.user,
+                    name="Wrong type",
+                    account_type=AccountType.INCOME,
+                    currency=Currency.BRL,
+                    system_role=AccountSystemRole.PRIMARY,
+                )
 
 
 class TransactionModelTests(TestCase):
