@@ -10,6 +10,15 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
+from conversations.models import (
+    Conversation,
+    ConversationChannel,
+    Message,
+    MessageDirection,
+    MessageStatus,
+    MessageType,
+)
+
 from ..client import (
     TelegramAPIError,
     TelegramUnavailableError,
@@ -21,7 +30,7 @@ from ..models import (
     TelegramUpdateStatus,
     TelegramUpdateType,
 )
-from ..webhook import ERROR_REPLIES, LINK_SUCCESS_REPLY
+from ..webhook import ERROR_REPLIES, LINK_SUCCESS_REPLY, TEXT_MESSAGE_REPLY
 from .fakes import FakeTelegramClient
 
 WEBHOOK_SECRET = "test-webhook-secret"
@@ -322,12 +331,12 @@ class TelegramWebhookViewTests(APITestCase):
 
     # --- Other update kinds -------------------------------------------------
 
-    def test_plain_text_message_is_recorded_as_unsupported_for_now(self):
+    def test_plain_text_from_unlinked_telegram_is_rejected(self):
         self._post(self._message_update(text="gastei 35 no almoço"))
 
         update = TelegramUpdate.objects.get()
         self.assertEqual(update.status, TelegramUpdateStatus.FAILED)
-        self.assertEqual(update.error_code, "unsupported_message")
+        self.assertEqual(update.error_code, "telegram_not_linked")
 
     def test_unknown_command_is_recorded_as_unsupported(self):
         self._post(self._message_update(text="/help"))
@@ -390,7 +399,7 @@ class TelegramWebhookViewTests(APITestCase):
             (4001, "/start raw-link-token", "expired_link_token"),
             (4002, "/start unknown", "invalid_link_token"),
             (4003, "/start", "start_without_token"),
-            (4004, "gastei 35", "unsupported_message"),
+            (4004, "gastei 35", "telegram_not_linked"),
         )
         for update_id, text, error_code in cases:
             with self.subTest(error_code=error_code):
@@ -478,3 +487,131 @@ class TelegramWebhookViewTests(APITestCase):
 
         for line in logs.output:
             self.assertNotIn("log-sensitive-token", line)
+
+    # --- Persisted text conversations --------------------------------------
+
+    def _link_identity(self, *, user=None, telegram_id=TELEGRAM_ID):
+        return TelegramIdentity.objects.create(
+            user=user or self.user,
+            telegram_user_id=telegram_id,
+            private_chat_id=telegram_id,
+        )
+
+    def test_linked_text_creates_conversation_and_inbound_outbound_messages(self):
+        self._link_identity()
+
+        response = self._post(
+            self._message_update(text="gastei 35 reais no almoço")
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        update = TelegramUpdate.objects.get()
+        self.assertEqual(update.status, TelegramUpdateStatus.COMPLETED)
+
+        conversation = Conversation.objects.get()
+        self.assertEqual(conversation.user, self.user)
+        self.assertEqual(conversation.channel, ConversationChannel.TELEGRAM)
+
+        messages = list(conversation.messages.order_by("created_at"))
+        self.assertEqual(len(messages), 2)
+        inbound, outbound = messages
+        self.assertEqual(inbound.direction, MessageDirection.INBOUND)
+        self.assertEqual(inbound.message_type, MessageType.TEXT)
+        self.assertEqual(inbound.status, MessageStatus.COMPLETED)
+        self.assertEqual(inbound.content, "gastei 35 reais no almoço")
+        self.assertIsNotNone(inbound.processed_at)
+        self.assertEqual(outbound.direction, MessageDirection.OUTBOUND)
+        self.assertEqual(outbound.message_type, MessageType.TEXT)
+        self.assertEqual(outbound.status, MessageStatus.COMPLETED)
+        self.assertEqual(outbound.content, TEXT_MESSAGE_REPLY)
+        self.assertIsNotNone(outbound.processed_at)
+
+    def test_subsequent_text_reuses_active_conversation(self):
+        self._link_identity()
+
+        self._post(self._message_update(update_id=6001, text="primeira"))
+        self._post(self._message_update(update_id=6002, text="segunda"))
+
+        self.assertEqual(Conversation.objects.count(), 1)
+        self.assertEqual(Message.objects.count(), 4)
+
+    def test_duplicate_update_does_not_duplicate_conversation_messages(self):
+        self._link_identity()
+        payload = self._message_update(update_id=6003, text="mensagem única")
+
+        self._post(payload)
+        self._post(payload)
+
+        self.assertEqual(Conversation.objects.count(), 1)
+        self.assertEqual(Message.objects.count(), 2)
+
+    def test_revoked_identity_cannot_create_conversation(self):
+        identity = self._link_identity()
+        identity.revoked_at = timezone.now()
+        identity.save(update_fields=["revoked_at", "updated_at"])
+
+        self._post(self._message_update(update_id=6004, text="olá"))
+
+        update = TelegramUpdate.objects.get(update_id=6004)
+        self.assertEqual(update.status, TelegramUpdateStatus.FAILED)
+        self.assertEqual(update.error_code, "telegram_not_linked")
+        self.assertEqual(Conversation.objects.count(), 0)
+        self.assertEqual(Message.objects.count(), 0)
+
+    def test_telegram_identity_isolates_conversations_by_user(self):
+        self._link_identity(user=self.user, telegram_id=111111111)
+        self._link_identity(user=self.other_user, telegram_id=222222222)
+
+        self._post(
+            self._message_update(
+                update_id=6005,
+                text="mensagem do primeiro",
+                chat_id=111111111,
+                from_id=111111111,
+            )
+        )
+        self._post(
+            self._message_update(
+                update_id=6006,
+                text="mensagem do segundo",
+                chat_id=222222222,
+                from_id=222222222,
+            )
+        )
+
+        self.assertEqual(Conversation.objects.count(), 2)
+        self.assertEqual(
+            Conversation.objects.get(user=self.user)
+            .messages.get(direction=MessageDirection.INBOUND)
+            .content,
+            "mensagem do primeiro",
+        )
+        self.assertEqual(
+            Conversation.objects.get(user=self.other_user)
+            .messages.get(direction=MessageDirection.INBOUND)
+            .content,
+            "mensagem do segundo",
+        )
+
+    def test_send_failure_keeps_inbound_but_does_not_record_outbound(self):
+        self._link_identity()
+        self.mock_get_client.return_value = FakeTelegramClient(
+            error=TelegramUnavailableError("Telegram sendMessage timed out.")
+        )
+
+        with self.assertLogs("telegram_bot.webhook", level="WARNING"):
+            self._post(self._message_update(update_id=6007, text="olá"))
+
+        message = Message.objects.get()
+        self.assertEqual(message.direction, MessageDirection.INBOUND)
+        self.assertEqual(message.content, "olá")
+
+    def test_start_token_is_never_persisted_as_conversation_message(self):
+        self._create_token(raw_token="never-store-this-token")
+
+        self._post(
+            self._message_update(text="  /start never-store-this-token  ")
+        )
+
+        self.assertEqual(Conversation.objects.count(), 0)
+        self.assertEqual(Message.objects.count(), 0)

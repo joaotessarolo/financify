@@ -153,6 +153,33 @@ class ConversationModelTests(TestCase):
             [other_user_conversation],
         )
 
+    def test_user_cannot_have_two_active_conversations_for_same_channel(self):
+        Conversation.objects.create(
+            user=self.user,
+            channel=ConversationChannel.TELEGRAM,
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Conversation.objects.create(
+                    user=self.user,
+                    channel=ConversationChannel.TELEGRAM,
+                )
+
+    def test_archived_conversations_do_not_block_new_active_conversation(self):
+        Conversation.objects.create(
+            user=self.user,
+            channel=ConversationChannel.TELEGRAM,
+            status=ConversationStatus.ARCHIVED,
+        )
+
+        active = Conversation.objects.create(
+            user=self.user,
+            channel=ConversationChannel.TELEGRAM,
+        )
+
+        self.assertEqual(active.status, ConversationStatus.ACTIVE)
+
 
 class MessageModelTests(TestCase):
     @classmethod
@@ -239,6 +266,7 @@ class MessageModelTests(TestCase):
         conversation = Conversation.objects.create(
             user=self.user,
             channel=ConversationChannel.TELEGRAM,
+            status=ConversationStatus.ARCHIVED,
         )
         message = Message.objects.create(
             conversation=conversation,

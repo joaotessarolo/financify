@@ -1,10 +1,81 @@
-from django.db import transaction as db_transaction
+from django.db import IntegrityError, transaction as db_transaction
 from django.utils import timezone
 
 from ledger.models import Entry, Transaction, TransactionSource, TransactionStatus
 from ledger.services import TransactionPostingError, post_transaction
 
-from .models import TransactionDraft, TransactionDraftStatus
+from .models import (
+    Conversation,
+    ConversationStatus,
+    Message,
+    MessageDirection,
+    MessageStatus,
+    MessageType,
+    TransactionDraft,
+    TransactionDraftStatus,
+)
+
+
+def get_or_create_active_conversation(*, user, channel: str) -> Conversation:
+    conversation = Conversation.objects.filter(
+        user=user,
+        channel=channel,
+        status=ConversationStatus.ACTIVE,
+    ).first()
+    if conversation is not None:
+        return conversation
+
+    try:
+        with db_transaction.atomic():
+            return Conversation.objects.create(user=user, channel=channel)
+    except IntegrityError:
+        return Conversation.objects.get(
+            user=user,
+            channel=channel,
+            status=ConversationStatus.ACTIVE,
+        )
+
+
+@db_transaction.atomic
+def record_completed_text_message(
+    *,
+    conversation: Conversation,
+    direction: str,
+    content: str,
+) -> Message:
+    message = Message.objects.create(
+        conversation=conversation,
+        direction=direction,
+        message_type=MessageType.TEXT,
+        status=MessageStatus.RECEIVED,
+        content=content,
+    )
+    message.status = MessageStatus.PROCESSING
+    message.save(update_fields=["status", "updated_at"])
+    message.status = MessageStatus.COMPLETED
+    message.processed_at = timezone.now()
+    message.save(update_fields=["status", "processed_at", "updated_at"])
+    return message
+
+
+def record_completed_inbound_text_message(
+    *, conversation: Conversation, content: str
+) -> Message:
+    return record_completed_text_message(
+        conversation=conversation,
+        direction=MessageDirection.INBOUND,
+        content=content,
+    )
+
+
+def record_completed_outbound_text_message(
+    *, conversation: Conversation, content: str
+) -> Message:
+    return record_completed_text_message(
+        conversation=conversation,
+        direction=MessageDirection.OUTBOUND,
+        content=content,
+    )
 
 
 class DraftConfirmationError(Exception):

@@ -80,6 +80,11 @@ class Conversation(models.Model):
                 condition=models.Q(status__in=ConversationStatus.values),
                 name="conversations_conversation_status_supported",
             ),
+            models.UniqueConstraint(
+                fields=["user", "channel"],
+                condition=models.Q(status=ConversationStatus.ACTIVE),
+                name="conversations_one_active_per_user_channel",
+            ),
         ]
 
     def __str__(self):
