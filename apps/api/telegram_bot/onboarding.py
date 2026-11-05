@@ -26,7 +26,6 @@ _BALANCE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-
 def parse_balance(text: str) -> Decimal:
     normalized = text.strip().lower()
     normalized = re.sub(r"\b(reais?|brl)\b", "", normalized)
@@ -56,16 +55,32 @@ def parse_account_setup(text: str) -> AccountSetupInput:
     if not normalized:
         raise OnboardingParseError("Account name is required.")
 
-    separator = re.search(r"\s*(?:,|\bcom\b|\bsaldo(?:\s+de)?\b)\s*", normalized, re.I)
+    separator = re.search(
+        r"\s*(?:(?<!\d),|\bcom\b|\bsaldo(?:\s+de)?\b)\s*",
+        normalized,
+        re.I,
+    )
     if separator is None:
         name, balance = normalized, None
+        parts = normalized.split()
+        for index in range(1, len(parts)):
+            candidate_name = " ".join(parts[:index])
+            candidate_balance = " ".join(parts[index:])
+            if not any(char.isalpha() for char in candidate_name):
+                continue
+            try:
+                parsed_balance = parse_balance(candidate_balance)
+            except OnboardingParseError:
+                continue
+            name, balance = candidate_name, parsed_balance
+            break
     else:
         name = normalized[: separator.start()].strip(" ,")
         remainder = normalized[separator.end() :].strip(" ,")
         remainder = re.sub(r"^(?:BRL|R\$)\s*", "", remainder, flags=re.I)
         remainder = remainder.strip(" ,")
         balance = parse_balance(remainder)
-    if not name or len(name) > 120 or any(char.isdigit() for char in name):
+    if not name or len(name) > 120 or not any(char.isalpha() for char in name):
         raise OnboardingParseError("Invalid account name.")
     return AccountSetupInput(name=name, balance=balance)
 

@@ -35,6 +35,9 @@ class OnboardingParserTests(TestCase):
             ("Nubank, 50 mil reais", "Nubank", Decimal("50000.00")),
             ("Itaú com -300", "Itaú", Decimal("-300.00")),
             ("Inter, BRL, 1.250,90", "Inter", Decimal("1250.90")),
+            ("itau 12000", "itau", Decimal("12000.00")),
+            ("itau 12000 reais", "itau", Decimal("12000.00")),
+            ("C6 Bank 2.500,50", "C6 Bank", Decimal("2500.50")),
         )
         for text, name, balance in cases:
             with self.subTest(text=text):
