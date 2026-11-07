@@ -3,13 +3,27 @@ from decimal import Decimal
 from django.test import SimpleTestCase
 
 from ..extraction import (
+    ExtractedTransaction,
     TextExtractionError,
+    TransactionExtractor,
     TransactionKind,
     extract_transaction_from_text,
 )
 
 
+class StubTransactionExtractor:
+    def extract(self, text: str) -> ExtractedTransaction:
+        return ExtractedTransaction(
+            kind=TransactionKind.EXPENSE,
+            amount=Decimal("1.00"),
+            description=text,
+        )
+
+
 class ExtractTransactionFromTextTests(SimpleTestCase):
+    def test_extractor_contract_supports_structural_implementations(self):
+        self.assertIsInstance(StubTransactionExtractor(), TransactionExtractor)
+
     def test_accepts_natural_expense_forms(self):
         cases = (
             ("gasto de 2500", Decimal("2500.00"), "Despesa"),

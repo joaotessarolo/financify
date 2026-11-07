@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import re
+from typing import Protocol, runtime_checkable
 
 
 class TextExtractionError(ValueError):
@@ -17,6 +18,15 @@ class ExtractedTransaction:
     kind: str
     amount: Decimal
     description: str
+
+
+@runtime_checkable
+class TransactionExtractor(Protocol):
+    """Contract shared by deterministic and model-backed extractors."""
+
+    def extract(self, text: str) -> ExtractedTransaction:
+        """Extract a transaction or raise ``TextExtractionError``."""
+        ...
 
 
 _TRANSACTION_PATTERN = re.compile(
