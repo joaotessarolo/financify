@@ -3,11 +3,13 @@ from decimal import Decimal
 from django.test import SimpleTestCase
 
 from ..extraction import (
+    DeterministicTransactionExtractor,
     ExtractedTransaction,
     TextExtractionError,
     TransactionExtractor,
     TransactionKind,
     extract_transaction_from_text,
+    get_transaction_extractor,
 )
 
 
@@ -23,6 +25,12 @@ class StubTransactionExtractor:
 class ExtractTransactionFromTextTests(SimpleTestCase):
     def test_extractor_contract_supports_structural_implementations(self):
         self.assertIsInstance(StubTransactionExtractor(), TransactionExtractor)
+
+    def test_default_extractor_is_deterministic(self):
+        extractor = get_transaction_extractor()
+
+        self.assertIsInstance(extractor, DeterministicTransactionExtractor)
+        self.assertEqual(extractor.extract("gastei 10").amount, Decimal("10.00"))
 
     def test_accepts_natural_expense_forms(self):
         cases = (

@@ -29,7 +29,7 @@ from conversations.models import (
 )
 from conversations.extraction import (
     TextExtractionError,
-    extract_transaction_from_text,
+    get_transaction_extractor,
 )
 from conversations.services import (
     create_transaction_draft_from_extraction,
@@ -448,7 +448,7 @@ def handle_message(message: dict) -> DispatchResult:
             )
 
         try:
-            extraction = extract_transaction_from_text(normalized_text)
+            extraction = get_transaction_extractor().extract(normalized_text)
         except TextExtractionError:
             return DispatchResult(
                 reply=TEXT_FORMAT_REPLY,
