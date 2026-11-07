@@ -24,6 +24,10 @@ class StructuredTransactionProvider(Protocol):
         ...
 
 
+class TransactionExtractionProviderError(RuntimeError):
+    """The configured model provider could not produce a usable response."""
+
+
 class AITransactionExtractor:
     """Validate a model-produced candidate before it reaches the ledger."""
 

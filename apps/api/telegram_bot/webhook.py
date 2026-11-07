@@ -31,6 +31,7 @@ from conversations.extraction import (
     TextExtractionError,
     get_transaction_extractor,
 )
+from conversations.ai_extraction import TransactionExtractionProviderError
 from conversations.services import (
     create_transaction_draft_from_extraction,
     DraftConfirmationError,
@@ -88,6 +89,10 @@ LINK_SUCCESS_REPLY = (
 TEXT_FORMAT_REPLY = (
     "Não consegui criar o rascunho. Use algo como “gastei 35,90 no almoço” "
     "ou “receita de 2500 salário”."
+)
+
+AI_EXTRACTION_UNAVAILABLE_REPLY = (
+    "Não consegui analisar sua mensagem agora. Tente novamente em alguns instantes."
 )
 
 BALANCE_QUERY_PHRASES = {
@@ -449,6 +454,12 @@ def handle_message(message: dict) -> DispatchResult:
 
         try:
             extraction = get_transaction_extractor().extract(normalized_text)
+        except TransactionExtractionProviderError:
+            logger.exception("Transaction extraction provider failed.")
+            return DispatchResult(
+                reply=AI_EXTRACTION_UNAVAILABLE_REPLY,
+                conversation=conversation,
+            )
         except TextExtractionError:
             return DispatchResult(
                 reply=TEXT_FORMAT_REPLY,

@@ -191,3 +191,20 @@ TRANSACTION_DRAFT_TTL_SECONDS = env.int(
     "TRANSACTION_DRAFT_TTL_SECONDS",
     default=86400,
 )
+
+TRANSACTION_EXTRACTOR_BACKEND = env(
+    "TRANSACTION_EXTRACTOR_BACKEND",
+    default="deterministic",
+)
+
+OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
+
+OPENAI_TRANSACTION_MODEL = env(
+    "OPENAI_TRANSACTION_MODEL",
+    default="gpt-4o-mini",
+)
+
+OPENAI_API_TIMEOUT_SECONDS = env.float(
+    "OPENAI_API_TIMEOUT_SECONDS",
+    default=15.0,
+)

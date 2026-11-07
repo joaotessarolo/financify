@@ -81,7 +81,30 @@ class DeterministicTransactionExtractor:
 
 
 def get_transaction_extractor() -> TransactionExtractor:
-    return DeterministicTransactionExtractor()
+    from django.conf import settings
+    from django.core.exceptions import ImproperlyConfigured
+
+    backend = settings.TRANSACTION_EXTRACTOR_BACKEND
+    if backend == "deterministic":
+        return DeterministicTransactionExtractor()
+    if backend == "openai":
+        if not settings.OPENAI_API_KEY:
+            raise ImproperlyConfigured(
+                "OPENAI_API_KEY is required for the OpenAI transaction extractor."
+            )
+        from .ai_extraction import AITransactionExtractor
+        from .openai_extraction import OpenAIStructuredTransactionProvider
+
+        return AITransactionExtractor(
+            provider=OpenAIStructuredTransactionProvider(
+                api_key=settings.OPENAI_API_KEY,
+                model=settings.OPENAI_TRANSACTION_MODEL,
+                timeout=settings.OPENAI_API_TIMEOUT_SECONDS,
+            )
+        )
+    raise ImproperlyConfigured(
+        f"Unsupported TRANSACTION_EXTRACTOR_BACKEND: {backend!r}."
+    )
 
 
 def extract_transaction_from_text(text: str) -> ExtractedTransaction:
