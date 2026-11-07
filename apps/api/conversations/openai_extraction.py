@@ -14,6 +14,7 @@ class OpenAITransactionCandidate(BaseModel):
     kind: Literal["EXPENSE", "INCOME"] | None
     amount: str | None
     description: str | None
+    account_name: str | None
 
 
 class OpenAIStructuredTransactionProvider:
@@ -30,7 +31,9 @@ class OpenAIStructuredTransactionProvider:
                     "português. Use EXPENSE para dinheiro gasto e INCOME para dinheiro "
                     "recebido. Retorne amount como decimal positivo com ponto, sem símbolo "
                     "de moeda. Crie uma descrição curta e fiel. Se a mensagem não registrar "
-                    "uma transação, marque supported=false e deixe os outros campos nulos."
+                    "uma transação, marque supported=false e deixe os outros campos nulos. "
+                    "Quando houver uma conta explicitamente citada, copie seu nome para "
+                    "account_name; caso contrário, retorne null."
                 ),
                 input=text,
                 text_format=OpenAITransactionCandidate,
@@ -51,4 +54,5 @@ class OpenAIStructuredTransactionProvider:
             kind=parsed.kind,
             amount=parsed.amount,
             description=parsed.description,
+            account_name=parsed.account_name,
         )

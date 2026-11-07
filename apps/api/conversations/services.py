@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from ledger.models import (
     AccountSystemRole,
+    AccountType,
     Entry,
     EntrySide,
     Transaction,
@@ -105,6 +106,7 @@ def create_transaction_draft_from_extraction(
     source_message: Message,
     extraction: ExtractedTransaction,
     occurred_at: datetime,
+    transaction_account=None,
 ) -> TransactionDraft:
     user = source_message.conversation.user
     ttl_seconds = settings.TRANSACTION_DRAFT_TTL_SECONDS
@@ -134,6 +136,18 @@ def create_transaction_draft_from_extraction(
             "Default account currencies do not match the user currency."
         )
 
+    if transaction_account is None:
+        transaction_account = accounts[AccountSystemRole.PRIMARY]
+    if (
+        transaction_account.user_id != user.id
+        or transaction_account.account_type != AccountType.ASSET
+        or not transaction_account.is_active
+        or transaction_account.currency != user.currency
+    ):
+        raise DefaultAccountConfigurationError(
+            "Transaction account must be an active asset owned by the user."
+        )
+
     draft = TransactionDraft.objects.create(
         user=user,
         source_message=source_message,
@@ -145,9 +159,9 @@ def create_transaction_draft_from_extraction(
 
     if extraction.kind == TransactionKind.EXPENSE:
         debit_account = accounts[AccountSystemRole.GENERAL_EXPENSE]
-        credit_account = accounts[AccountSystemRole.PRIMARY]
+        credit_account = transaction_account
     elif extraction.kind == TransactionKind.INCOME:
-        debit_account = accounts[AccountSystemRole.PRIMARY]
+        debit_account = transaction_account
         credit_account = accounts[AccountSystemRole.GENERAL_INCOME]
     else:
         raise ValueError("Unsupported extracted transaction kind.")

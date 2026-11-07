@@ -36,6 +36,7 @@ class ExtractTransactionFromTextTests(SimpleTestCase):
         cases = (
             ("gasto de 2500", Decimal("2500.00"), "Despesa"),
             ("gastei 2500", Decimal("2500.00"), "Despesa"),
+            ("paguei 10 almoço", Decimal("10.00"), "almoço"),
             ("despesa R$ 35,90 almoço", Decimal("35.90"), "almoço"),
             ("gastei 35 reais no almoço", Decimal("35.00"), "no almoço"),
         )
@@ -70,7 +71,6 @@ class ExtractTransactionFromTextTests(SimpleTestCase):
     def test_rejects_unsupported_or_invalid_values(self):
         invalid_values = (
             "",
-            "paguei 10 almoço",
             "gastei almoço",
             "gasto 0 almoço",
             "receita -10",

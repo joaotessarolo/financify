@@ -24,6 +24,7 @@ class OpenAIStructuredTransactionProviderTests(SimpleTestCase):
                 kind="EXPENSE",
                 amount="42.50",
                 description="Mercado",
+                account_name="Nubank",
             )
         )
         provider = OpenAIStructuredTransactionProvider(
@@ -39,6 +40,7 @@ class OpenAIStructuredTransactionProviderTests(SimpleTestCase):
         self.assertEqual(candidate.kind, "EXPENSE")
         self.assertEqual(candidate.amount, "42.50")
         self.assertEqual(candidate.description, "Mercado")
+        self.assertEqual(candidate.account_name, "Nubank")
         call = client.responses.parse.call_args.kwargs
         self.assertEqual(call["model"], "test-model")
         self.assertEqual(call["input"], "torrei 42,50 no mercado")

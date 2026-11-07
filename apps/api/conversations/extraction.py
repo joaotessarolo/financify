@@ -18,6 +18,7 @@ class ExtractedTransaction:
     kind: str
     amount: Decimal
     description: str
+    account_name: str | None = None
 
 
 @runtime_checkable
@@ -30,7 +31,7 @@ class TransactionExtractor(Protocol):
 
 
 _TRANSACTION_PATTERN = re.compile(
-    r"^(?P<kind>gasto|gastei|despesa|receita|ganho|ganhei)\s+"
+    r"^(?P<kind>gasto|gastei|paguei|despesa|receita|ganho|ganhei|recebi)\s+"
     r"(?:de\s+)?(?:r\$\s*)?"
     r"(?P<amount>\d+(?:[.,]\d{1,2})?)"
     r"(?:\s+(?:reais?|brl))?"
@@ -61,7 +62,7 @@ class DeterministicTransactionExtractor:
         raw_kind = match.group("kind").lower()
         kind = (
             TransactionKind.INCOME
-            if raw_kind in {"receita", "ganho", "ganhei"}
+            if raw_kind in {"receita", "ganho", "ganhei", "recebi"}
             else TransactionKind.EXPENSE
         )
         raw_description = match.group("description")

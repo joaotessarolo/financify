@@ -7,7 +7,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from common.money import Currency
-from ledger.models import AccountSystemRole, EntrySide, Transaction
+from ledger.models import Account, AccountSystemRole, AccountType, EntrySide, Transaction
 from ledger.services import ensure_default_accounts
 
 from ..extraction import TransactionKind, extract_transaction_from_text
@@ -107,6 +107,48 @@ class CreateTransactionDraftFromExtractionTests(TestCase):
             entries[EntrySide.CREDIT].account.system_role,
             AccountSystemRole.GENERAL_INCOME,
         )
+
+    def test_expense_can_use_an_additional_asset_account(self):
+        account = Account.objects.create(
+            user=self.user,
+            name="Inter",
+            account_type=AccountType.ASSET,
+            currency=Currency.BRL,
+        )
+        source = self._message("gastei 20 no café")
+
+        draft = create_transaction_draft_from_extraction(
+            source_message=source,
+            extraction=extract_transaction_from_text(source.content),
+            occurred_at=timezone.now(),
+            transaction_account=account,
+        )
+
+        self.assertEqual(
+            draft.entries.get(side=EntrySide.CREDIT).account,
+            account,
+        )
+
+    def test_rejects_transaction_account_owned_by_another_user(self):
+        other_user = get_user_model().objects.create_user(
+            email="other-draft@example.com",
+            password="StrongPassword!123",
+        )
+        account = Account.objects.create(
+            user=other_user,
+            name="Other",
+            account_type=AccountType.ASSET,
+            currency=Currency.BRL,
+        )
+        source = self._message("gastei 20 no café")
+
+        with self.assertRaises(DefaultAccountConfigurationError):
+            create_transaction_draft_from_extraction(
+                source_message=source,
+                extraction=extract_transaction_from_text(source.content),
+                occurred_at=timezone.now(),
+                transaction_account=account,
+            )
 
     def test_missing_or_inactive_default_account_rolls_back_draft(self):
         self.user.accounts.filter(

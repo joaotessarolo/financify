@@ -15,6 +15,7 @@ class StructuredTransactionCandidate:
     kind: str | None = None
     amount: str | None = None
     description: str | None = None
+    account_name: str | None = None
 
 
 class StructuredTransactionProvider(Protocol):
@@ -63,4 +64,10 @@ class AITransactionExtractor:
             kind=candidate.kind,
             amount=amount.quantize(Decimal("0.01")),
             description=description,
+            account_name=(
+                candidate.account_name.strip()
+                if isinstance(candidate.account_name, str)
+                and candidate.account_name.strip()
+                else None
+            ),
         )

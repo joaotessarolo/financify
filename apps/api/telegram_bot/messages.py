@@ -28,6 +28,19 @@ def account_balance(account_name: str, currency: str, balance) -> str:
     return f"{account_name}\nSaldo disponível: {currency} {formatted}"
 
 
+def account_created(account_name: str, currency: str, balance) -> str:
+    formatted = f"{balance:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
+    return f"Conta criada: {account_name} · {currency} {formatted}"
+
+
+def account_list(accounts) -> str:
+    lines = ["Suas contas:"]
+    for account, balance in accounts:
+        formatted = f"{balance:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
+        lines.append(f"• {account.name} · {account.currency} {formatted}")
+    return "\n".join(lines)
+
+
 INVALID_ACCOUNT_SETUP = (
     "Não consegui identificar a conta. Tente algo como “Nubank, 2.500 reais” "
     "ou envie somente o nome da conta."

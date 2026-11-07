@@ -20,8 +20,14 @@ from conversations.models import (
     TransactionDraft,
     TransactionDraftStatus,
 )
-from ledger.models import AccountSystemRole, Transaction, TransactionSource, TransactionStatus
-from ledger.services import calculate_account_balance
+from ledger.models import (
+    AccountSystemRole,
+    EntrySide,
+    Transaction,
+    TransactionSource,
+    TransactionStatus,
+)
+from ledger.services import calculate_account_balance, ensure_default_accounts
 
 from ..client import (
     TelegramAPIError,
@@ -634,6 +640,81 @@ class TelegramWebhookViewTests(APITestCase):
         self._post(self._message_update(update_id=6011, text="saldo do itau"))
 
         self.assertIn("BRL 1.250,00", self.telegram.sent_messages[-1]["text"])
+
+    def test_creates_lists_and_queries_additional_account(self):
+        self._link_identity()
+
+        self._post(
+            self._message_update(
+                update_id=6020,
+                text="criar conta Inter com saldo 500",
+            )
+        )
+        self.assertIn("Conta criada: Inter", self.telegram.sent_messages[-1]["text"])
+
+        self._post(self._message_update(update_id=6021, text="minhas contas"))
+        accounts_reply = self.telegram.sent_messages[-1]["text"]
+        self.assertIn("Conta principal", accounts_reply)
+        self.assertIn("Inter · BRL 500,00", accounts_reply)
+
+        self._post(self._message_update(update_id=6022, text="saldo do Inter"))
+        self.assertIn("Inter", self.telegram.sent_messages[-1]["text"])
+        self.assertIn("BRL 500,00", self.telegram.sent_messages[-1]["text"])
+
+    def test_expense_uses_account_mentioned_in_message(self):
+        self._link_identity()
+        self._post(
+            self._message_update(
+                update_id=6030,
+                text="criar conta Inter com saldo 500",
+            )
+        )
+
+        self._post(
+            self._message_update(
+                update_id=6031,
+                text="paguei 120 de internet no Inter",
+            )
+        )
+
+        draft = TransactionDraft.objects.get()
+        credit_entry = draft.entries.get(side=EntrySide.CREDIT)
+        self.assertEqual(credit_entry.account.name, "Inter")
+        self.assertEqual(draft.description, "de internet")
+        self.assertIn("Conta: Inter", self.telegram.sent_messages[-1]["text"])
+
+    def test_income_uses_account_mentioned_in_message(self):
+        self._link_identity()
+        self._post(
+            self._message_update(
+                update_id=6040,
+                text="criar conta Inter com saldo 0",
+            )
+        )
+
+        self._post(
+            self._message_update(
+                update_id=6041,
+                text="recebi 2500 de salário no Inter",
+            )
+        )
+
+        draft = TransactionDraft.objects.get()
+        debit_entry = draft.entries.get(side=EntrySide.DEBIT)
+        self.assertEqual(debit_entry.account.name, "Inter")
+        self.assertIn("Conta: Inter", self.telegram.sent_messages[-1]["text"])
+
+    def test_transaction_without_account_keeps_primary_account(self):
+        self._link_identity()
+        primary = ensure_default_accounts(user=self.user).primary
+
+        self._post(self._message_update(update_id=6050, text="gastei 25 no café"))
+
+        draft = TransactionDraft.objects.get()
+        self.assertEqual(
+            draft.entries.get(side=EntrySide.CREDIT).account,
+            primary,
+        )
 
     def test_subsequent_text_reuses_active_conversation(self):
         self._link_identity()

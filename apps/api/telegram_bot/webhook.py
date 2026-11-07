@@ -8,7 +8,7 @@ Raw payloads and account-linking tokens are never persisted or logged.
 Ordinary text from linked users is stored in the conversation history.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import logging
 import unicodedata
@@ -18,7 +18,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.db import IntegrityError, transaction as db_transaction
 from django.utils import timezone
 
-from ledger.models import AccountSystemRole
+from ledger.models import AccountSystemRole, AccountType
 from ledger.services import calculate_account_balance, ensure_default_accounts
 
 from conversations.models import (
@@ -44,6 +44,14 @@ from conversations.services import (
 )
 
 from .client import TelegramClient, TelegramClientError, get_telegram_client
+from .accounts import (
+    TelegramAccountError,
+    create_asset_account,
+    find_asset_account,
+    normalize_account_name,
+    parse_create_account,
+    select_transaction_account,
+)
 from .models import (
     TelegramIdentity,
     TelegramOnboardingStep,
@@ -55,6 +63,8 @@ from .messages import (
     ACCOUNT_ONBOARDING_PROMPT,
     INVALID_ACCOUNT_SETUP,
     INVALID_BALANCE,
+    account_created,
+    account_list,
     account_balance,
     balance_prompt,
     onboarding_complete,
@@ -169,10 +179,11 @@ class DispatchResult:
     edit_text: str | None = None
 
 
-def _draft_reply(*, description: str, amount, currency: str) -> str:
+def _draft_reply(*, description: str, amount, currency: str, account_name: str) -> str:
     formatted_amount = f"{amount:.2f}".replace(".", ",")
     return (
-        f"Rascunho criado: {description} — {currency} {formatted_amount}. "
+        f"Rascunho criado: {description} — {currency} {formatted_amount}.\n"
+        f"Conta: {account_name}.\n"
         "Revise os dados e confirme ou cancele abaixo."
     )
 
@@ -431,29 +442,92 @@ def handle_message(message: dict) -> DispatchResult:
                 conversation=conversation,
             )
 
-        requested_account = _balance_query_account(normalized_text)
-        if requested_account is not None:
-            primary = ensure_default_accounts(user=identity.user).primary
-            normalized_name = unicodedata.normalize("NFKD", primary.name.lower())
-            normalized_name = "".join(
-                char for char in normalized_name if not unicodedata.combining(char)
-            )
-            if requested_account and requested_account != normalized_name:
-                return DispatchResult(
-                    reply=f"Não encontrei a conta “{requested_account}”. Sua conta principal é “{primary.name}”.",
-                    conversation=conversation,
-                )
+        normalized_command = normalize_account_name(normalized_text.rstrip("?"))
+        if normalized_command == "minhas contas":
+            accounts = identity.user.accounts.filter(
+                account_type=AccountType.ASSET,
+                is_active=True,
+            ).order_by("created_at")
             return DispatchResult(
-                reply=account_balance(
-                    primary.name,
-                    primary.currency,
-                    calculate_account_balance(account=primary),
+                reply=account_list(
+                    [
+                        (account, calculate_account_balance(account=account))
+                        for account in accounts
+                    ]
                 ),
                 conversation=conversation,
             )
 
         try:
-            extraction = get_transaction_extractor().extract(normalized_text)
+            account_setup = parse_create_account(normalized_text)
+        except TelegramAccountError:
+            return DispatchResult(
+                reply=(
+                    "Não consegui criar a conta. Envie algo como "
+                    "“criar conta Inter com saldo 500”."
+                ),
+                conversation=conversation,
+            )
+        if account_setup is not None:
+            try:
+                created_account = create_asset_account(
+                    user=identity.user,
+                    setup=account_setup,
+                )
+            except TelegramAccountError:
+                return DispatchResult(
+                    reply="Já existe uma conta ativa com esse nome.",
+                    conversation=conversation,
+                )
+            return DispatchResult(
+                reply=account_created(
+                    created_account.name,
+                    created_account.currency,
+                    account_setup.balance,
+                ),
+                conversation=conversation,
+            )
+
+        requested_account = _balance_query_account(normalized_text)
+        if requested_account is not None:
+            primary = ensure_default_accounts(user=identity.user).primary
+            account = (
+                find_asset_account(user=identity.user, name=requested_account)
+                if requested_account
+                else primary
+            )
+            if account is None:
+                return DispatchResult(
+                    reply=f"Não encontrei a conta “{requested_account}”.",
+                    conversation=conversation,
+                )
+            return DispatchResult(
+                reply=account_balance(
+                    account.name,
+                    account.currency,
+                    calculate_account_balance(account=account),
+                ),
+                conversation=conversation,
+            )
+
+        try:
+            extractor = get_transaction_extractor()
+            extraction = extractor.extract(normalized_text)
+            transaction_account, cleaned_text, extraction = select_transaction_account(
+                user=identity.user,
+                text=normalized_text,
+                extraction=extraction,
+            )
+            if cleaned_text != normalized_text:
+                extraction = replace(
+                    extractor.extract(cleaned_text),
+                    account_name=transaction_account.name,
+                )
+        except TelegramAccountError:
+            return DispatchResult(
+                reply="Não encontrei a conta mencionada. Confira em “minhas contas”.",
+                conversation=conversation,
+            )
         except TransactionExtractionProviderError:
             logger.exception("Transaction extraction provider failed.")
             return DispatchResult(
@@ -470,12 +544,18 @@ def handle_message(message: dict) -> DispatchResult:
             source_message=source_message,
             extraction=extraction,
             occurred_at=occurred_at,
+            transaction_account=transaction_account,
         )
         return DispatchResult(
             reply=_draft_reply(
                 description=draft.description,
                 amount=extraction.amount,
                 currency=draft.currency,
+                account_name=(
+                    transaction_account.name
+                    if transaction_account is not None
+                    else ensure_default_accounts(user=identity.user).primary.name
+                ),
             ),
             conversation=conversation,
             reply_markup=_draft_reply_markup(draft.id),
