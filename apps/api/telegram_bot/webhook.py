@@ -11,11 +11,15 @@ Ordinary text from linked users is stored in the conversation history.
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
+import unicodedata
 import uuid
 
 from django.core.exceptions import ImproperlyConfigured
 from django.db import IntegrityError, transaction as db_transaction
 from django.utils import timezone
+
+from ledger.models import AccountSystemRole
+from ledger.services import calculate_account_balance, ensure_default_accounts
 
 from conversations.models import (
     Conversation,
@@ -50,6 +54,7 @@ from .messages import (
     ACCOUNT_ONBOARDING_PROMPT,
     INVALID_ACCOUNT_SETUP,
     INVALID_BALANCE,
+    account_balance,
     balance_prompt,
     onboarding_complete,
 )
@@ -84,6 +89,15 @@ TEXT_FORMAT_REPLY = (
     "Não consegui criar o rascunho. Use algo como “gastei 35,90 no almoço” "
     "ou “receita de 2500 salário”."
 )
+
+BALANCE_QUERY_PHRASES = {
+    "saldo",
+    "meu saldo",
+    "qual meu saldo",
+    "qual e meu saldo",
+    "quanto tenho",
+    "quanto eu tenho",
+}
 
 # Safe, user-facing replies for known failures. Codes absent from this map
 # (e.g. non_private_chat, malformed updates) get no reply at all.
@@ -253,6 +267,18 @@ def _parse_command(text: str) -> tuple[str, str]:
     return command, rest.strip()
 
 
+def _balance_query_account(text: str) -> str | None:
+    normalized = unicodedata.normalize("NFKD", text.strip().lower().rstrip("?"))
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    normalized = " ".join(normalized.split())
+    if normalized in BALANCE_QUERY_PHRASES:
+        return ""
+    for prefix in ("saldo do ", "saldo da "):
+        if normalized.startswith(prefix) and normalized[len(prefix) :].strip():
+            return normalized[len(prefix) :].strip()
+    return None
+
+
 def handle_start_command(
     *, argument: str, from_id: int, chat_id: int
 ) -> DispatchResult:
@@ -397,6 +423,27 @@ def handle_message(message: dict) -> DispatchResult:
             return _handle_onboarding_message(
                 identity=identity,
                 text=normalized_text,
+                conversation=conversation,
+            )
+
+        requested_account = _balance_query_account(normalized_text)
+        if requested_account is not None:
+            primary = ensure_default_accounts(user=identity.user).primary
+            normalized_name = unicodedata.normalize("NFKD", primary.name.lower())
+            normalized_name = "".join(
+                char for char in normalized_name if not unicodedata.combining(char)
+            )
+            if requested_account and requested_account != normalized_name:
+                return DispatchResult(
+                    reply=f"Não encontrei a conta “{requested_account}”. Sua conta principal é “{primary.name}”.",
+                    conversation=conversation,
+                )
+            return DispatchResult(
+                reply=account_balance(
+                    primary.name,
+                    primary.currency,
+                    calculate_account_balance(account=primary),
+                ),
                 conversation=conversation,
             )
 

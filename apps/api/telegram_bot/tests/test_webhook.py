@@ -612,6 +612,29 @@ class TelegramWebhookViewTests(APITestCase):
         self.assertEqual(draft.description, "Receita")
         self.assertEqual(draft.entries.count(), 2)
 
+    def test_balance_query_returns_primary_account_balance_without_draft(self):
+        identity = self._link_identity(
+            onboarding_step=TelegramOnboardingStep.AWAITING_ACCOUNT
+        )
+        self._post(self._message_update(update_id=6001, text="Itaú, 12.000 reais"))
+
+        self._post(self._message_update(update_id=6002, text="quanto eu tenho?"))
+
+        reply = self.telegram.sent_messages[-1]["text"]
+        self.assertIn("Itaú", reply)
+        self.assertIn("BRL 12.000,00", reply)
+        self.assertEqual(TransactionDraft.objects.count(), 0)
+
+    def test_balance_query_accepts_primary_account_name(self):
+        identity = self._link_identity(
+            onboarding_step=TelegramOnboardingStep.AWAITING_ACCOUNT
+        )
+        self._post(self._message_update(update_id=6010, text="Itaú, 1.250 reais"))
+
+        self._post(self._message_update(update_id=6011, text="saldo do itau"))
+
+        self.assertIn("BRL 1.250,00", self.telegram.sent_messages[-1]["text"])
+
     def test_subsequent_text_reuses_active_conversation(self):
         self._link_identity()
 

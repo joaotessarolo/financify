@@ -23,6 +23,11 @@ def onboarding_complete(account_name: str, currency: str, balance) -> str:
     )
 
 
+def account_balance(account_name: str, currency: str, balance) -> str:
+    formatted = f"{balance:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
+    return f"{account_name}\nSaldo disponível: {currency} {formatted}"
+
+
 INVALID_ACCOUNT_SETUP = (
     "Não consegui identificar a conta. Tente algo como “Nubank, 2.500 reais” "
     "ou envie somente o nome da conta."
