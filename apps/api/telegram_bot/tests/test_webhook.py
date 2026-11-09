@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 import hashlib
 import json
 from unittest.mock import patch
@@ -601,13 +602,69 @@ class TelegramWebhookViewTests(APITestCase):
         self.assertIsNone(draft.transaction)
         preview = self.telegram.sent_messages[-1]
         buttons = preview["reply_markup"]["inline_keyboard"][0]
-        self.assertEqual([button["text"] for button in buttons], ["Confirmar", "Cancelar"])
+        self.assertEqual(
+            [button["text"] for button in buttons],
+            ["Confirmar", "Editar", "Cancelar"],
+        )
         self.assertEqual(
             buttons[0]["callback_data"], f"draft:confirm:{draft.id}"
         )
         self.assertEqual(
-            buttons[1]["callback_data"], f"draft:cancel:{draft.id}"
+            buttons[1]["callback_data"], f"draft:edit:{draft.id}"
         )
+        self.assertEqual(
+            buttons[2]["callback_data"], f"draft:cancel:{draft.id}"
+        )
+
+    def test_edits_latest_pending_draft_by_text_commands(self):
+        self._link_identity()
+        self._post(
+            self._message_update(
+                update_id=6060,
+                text="criar conta Inter com saldo 0",
+            )
+        )
+        self._post(self._message_update(update_id=6061, text="gastei 20 no café"))
+
+        self._post(
+            self._message_update(update_id=6062, text="alterar valor para 45,90")
+        )
+        self._post(
+            self._message_update(update_id=6063, text="trocar conta para Inter")
+        )
+        self._post(
+            self._message_update(update_id=6064, text="descrição Mercado")
+        )
+        self._post(
+            self._message_update(update_id=6065, text="trocar tipo para receita")
+        )
+
+        draft = TransactionDraft.objects.get()
+        entries = list(draft.entries.select_related("account"))
+        asset_entry = next(
+            entry for entry in entries if entry.account.account_type == "ASSET"
+        )
+        self.assertEqual(draft.description, "Mercado")
+        self.assertEqual(asset_entry.account.name, "Inter")
+        self.assertEqual(asset_entry.side, EntrySide.DEBIT)
+        self.assertEqual(asset_entry.amount, Decimal("45.90"))
+        self.assertIn("Conta: Inter", self.telegram.sent_messages[-1]["text"])
+
+    def test_edit_callback_explains_available_commands(self):
+        self._link_identity()
+        self._post(self._message_update(update_id=6070, text="gastei 20 no café"))
+        draft = TransactionDraft.objects.get()
+
+        self._post(
+            self._callback_update(
+                draft=draft,
+                action="edit",
+                update_id=6071,
+            )
+        )
+
+        self.assertIn("alterar valor", self.telegram.sent_messages[-1]["text"])
+        self.assertEqual(self.telegram.answered_callbacks[-1]["callback_query_id"], "callback-1")
 
     def test_natural_income_form_creates_draft(self):
         self._link_identity()

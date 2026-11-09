@@ -11,6 +11,7 @@ Ordinary text from linked users is stored in the conversation history.
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import logging
+import re
 import unicodedata
 import uuid
 
@@ -36,7 +37,10 @@ from conversations.services import (
     create_transaction_draft_from_extraction,
     DraftConfirmationError,
     DraftRejectionError,
+    DraftEditingError,
     confirm_transaction_draft,
+    edit_transaction_draft,
+    get_latest_pending_draft,
     get_or_create_active_conversation,
     record_completed_inbound_text_message,
     record_completed_outbound_text_message,
@@ -197,6 +201,10 @@ def _draft_reply_markup(draft_id) -> dict:
                     "callback_data": f"draft:confirm:{draft_id}",
                 },
                 {
+                    "text": "Editar",
+                    "callback_data": f"draft:edit:{draft_id}",
+                },
+                {
                     "text": "Cancelar",
                     "callback_data": f"draft:cancel:{draft_id}",
                 },
@@ -292,6 +300,20 @@ def _balance_query_account(text: str) -> str | None:
     for prefix in ("saldo do ", "saldo da "):
         if normalized.startswith(prefix) and normalized[len(prefix) :].strip():
             return normalized[len(prefix) :].strip()
+    return None
+
+
+def _parse_draft_edit(text: str):
+    patterns = (
+        ("amount", r"alterar\s+valor\s+para\s+(.+)"),
+        ("account", r"trocar\s+conta\s+para\s+(.+)"),
+        ("description", r"(?:alterar\s+)?descri(?:ç|c)[aã]o\s+(?:para\s+)?(.+)"),
+        ("kind", r"trocar\s+tipo\s+para\s+(gasto|despesa|receita|ganho)"),
+    )
+    for field, pattern in patterns:
+        match = re.fullmatch(pattern, text.strip(), flags=re.I)
+        if match:
+            return field, match.group(1).strip()
     return None
 
 
@@ -440,6 +462,53 @@ def handle_message(message: dict) -> DispatchResult:
                 identity=identity,
                 text=normalized_text,
                 conversation=conversation,
+            )
+
+        edit_command = _parse_draft_edit(normalized_text)
+        if edit_command is not None:
+            draft = get_latest_pending_draft(user=identity.user)
+            if draft is None:
+                return DispatchResult(
+                    reply="Você não tem um rascunho pendente para editar.",
+                    conversation=conversation,
+                )
+            field, value = edit_command
+            changes = {}
+            try:
+                if field == "amount":
+                    changes["amount"] = parse_balance(value)
+                elif field == "account":
+                    account = find_asset_account(user=identity.user, name=value)
+                    if account is None:
+                        raise TelegramAccountError("Account not found.")
+                    changes["transaction_account"] = account
+                elif field == "description":
+                    changes["description"] = value
+                else:
+                    changes["kind"] = (
+                        "INCOME"
+                        if value.casefold() in {"receita", "ganho"}
+                        else "EXPENSE"
+                    )
+                draft = edit_transaction_draft(draft=draft, **changes)
+            except (DraftEditingError, OnboardingParseError, TelegramAccountError):
+                return DispatchResult(
+                    reply="Não consegui aplicar essa alteração ao rascunho.",
+                    conversation=conversation,
+                )
+            entries = list(draft.entries.select_related("account"))
+            asset_entry = next(
+                entry for entry in entries if entry.account.account_type == AccountType.ASSET
+            )
+            return DispatchResult(
+                reply=_draft_reply(
+                    description=draft.description,
+                    amount=asset_entry.amount,
+                    currency=draft.currency,
+                    account_name=asset_entry.account.name,
+                ),
+                conversation=conversation,
+                reply_markup=_draft_reply_markup(draft.id),
             )
 
         normalized_command = normalize_account_name(normalized_text.rstrip("?"))
@@ -610,6 +679,7 @@ def handle_callback_query(callback: dict) -> DispatchResult:
     if len(parts) != 3 or parts[0] != "draft" or parts[1] not in {
         "confirm",
         "cancel",
+        "edit",
     }:
         return DispatchResult(
             reply="Esta ação não é válida.",
@@ -638,6 +708,22 @@ def handle_callback_query(callback: dict) -> DispatchResult:
         )
 
     conversation = draft.source_message.conversation
+    if parts[1] == "edit":
+        if draft.status != TransactionDraftStatus.PENDING:
+            return DispatchResult(
+                callback_query_id=callback_id,
+                callback_answer="Este rascunho não pode mais ser editado.",
+            )
+        return DispatchResult(
+            reply=(
+                "Envie uma alteração: “alterar valor para 45”, "
+                "“trocar conta para Inter”, “descrição Mercado” ou "
+                "“trocar tipo para receita”."
+            ),
+            conversation=conversation,
+            callback_query_id=callback_id,
+            callback_answer="Escolha o que deseja alterar.",
+        )
     if parts[1] == "confirm":
         if draft.status == TransactionDraftStatus.CONFIRMED:
             return DispatchResult(

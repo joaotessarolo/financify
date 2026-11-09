@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
@@ -195,6 +196,97 @@ class DraftExpiredError(DraftConfirmationError):
 
 class DraftRejectionError(Exception):
     pass
+
+
+class DraftEditingError(Exception):
+    pass
+
+
+def get_latest_pending_draft(*, user) -> TransactionDraft | None:
+    return (
+        TransactionDraft.objects.filter(
+            user=user,
+            status=TransactionDraftStatus.PENDING,
+            expires_at__gt=timezone.now(),
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
+
+@db_transaction.atomic
+def edit_transaction_draft(
+    *,
+    draft: TransactionDraft,
+    amount: Decimal | None = None,
+    description: str | None = None,
+    transaction_account=None,
+    kind: str | None = None,
+) -> TransactionDraft:
+    locked = TransactionDraft.objects.select_for_update().get(pk=draft.pk)
+    if locked.status != TransactionDraftStatus.PENDING or locked.expires_at <= timezone.now():
+        raise DraftEditingError("Only a non-expired pending draft can be edited.")
+
+    if description is not None:
+        description = description.strip()
+        if not description or len(description) > 255:
+            raise DraftEditingError("Invalid draft description.")
+        locked.description = description
+        locked.save(update_fields=["description", "updated_at"])
+
+    entries = list(locked.entries.select_related("account"))
+    if len(entries) != 2:
+        raise DraftEditingError("Draft entries are invalid.")
+
+    if amount is not None:
+        if amount <= 0 or amount > Decimal("999999999999.99"):
+            raise DraftEditingError("Invalid draft amount.")
+        for entry in entries:
+            entry.amount = amount.quantize(Decimal("0.01"))
+
+    current_kind = (
+        TransactionKind.EXPENSE
+        if any(
+            entry.account.system_role == AccountSystemRole.GENERAL_EXPENSE
+            for entry in entries
+        )
+        else TransactionKind.INCOME
+    )
+    target_kind = kind or current_kind
+    if target_kind not in {TransactionKind.EXPENSE, TransactionKind.INCOME}:
+        raise DraftEditingError("Invalid transaction kind.")
+
+    asset_entry = next(
+        (entry for entry in entries if entry.account.account_type == AccountType.ASSET),
+        None,
+    )
+    if asset_entry is None:
+        raise DraftEditingError("Draft has no asset account.")
+    account = transaction_account or asset_entry.account
+    if (
+        account.user_id != locked.user_id
+        or account.account_type != AccountType.ASSET
+        or not account.is_active
+        or account.currency != locked.currency
+    ):
+        raise DraftEditingError("Invalid transaction account.")
+
+    defaults = ensure_default_accounts(user=locked.user)
+    if target_kind == TransactionKind.EXPENSE:
+        asset_account, counterpart = account, defaults.general_expense
+        asset_side, counterpart_side = EntrySide.CREDIT, EntrySide.DEBIT
+    else:
+        asset_account, counterpart = account, defaults.general_income
+        asset_side, counterpart_side = EntrySide.DEBIT, EntrySide.CREDIT
+
+    asset_entry.account = asset_account
+    asset_entry.side = asset_side
+    counterpart_entry = next(entry for entry in entries if entry.pk != asset_entry.pk)
+    counterpart_entry.account = counterpart
+    counterpart_entry.side = counterpart_side
+    for entry in entries:
+        entry.save(update_fields=["account", "side", "amount", "updated_at"])
+    return locked
 
 
 def reject_transaction_draft(*, draft: TransactionDraft) -> TransactionDraft:
