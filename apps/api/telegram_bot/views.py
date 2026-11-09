@@ -4,7 +4,7 @@ from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from rest_framework import status
 from rest_framework.parsers import JSONParser
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -12,6 +12,7 @@ from .serializers import TelegramLinkSerializer
 from .services import create_telegram_link
 from .services import revoke_telegram_identity
 from .rate_limits import allow_request, client_ip
+from .observability import metrics_snapshot
 from .webhook import InvalidTelegramUpdateError, process_update
 
 WEBHOOK_SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token"
@@ -92,3 +93,10 @@ class TelegramWebhookView(APIView):
             )
 
         return Response({"ok": True}, status=status.HTTP_200_OK)
+
+
+class TelegramMetricsView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        return Response(metrics_snapshot())

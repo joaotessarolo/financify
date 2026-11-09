@@ -147,3 +147,18 @@ class TelegramLinkViewTests(APITestCase):
         self.assertEqual(response.data, {"revoked": True})
         identity.refresh_from_db()
         self.assertIsNotNone(identity.revoked_at)
+
+    def test_metrics_require_staff_user(self):
+        metrics_url = reverse("telegram_bot:metrics")
+        self.client.force_login(self.user)
+        self.assertEqual(
+            self.client.get(metrics_url).status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+        self.client.force_login(self.user)
+        response = self.client.get(metrics_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("updates_accepted", response.data)

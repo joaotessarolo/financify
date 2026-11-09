@@ -635,7 +635,7 @@ class TelegramWebhookViewTests(APITestCase):
         self.assertEqual(outbound.direction, MessageDirection.OUTBOUND)
         self.assertEqual(outbound.message_type, MessageType.TEXT)
         self.assertEqual(outbound.status, MessageStatus.COMPLETED)
-        self.assertIn("Rascunho criado:", outbound.content)
+        self.assertIn("Revise o lançamento", outbound.content)
         self.assertIsNotNone(outbound.processed_at)
 
         draft = TransactionDraft.objects.get()
@@ -1038,7 +1038,7 @@ class TelegramWebhookViewTests(APITestCase):
             {
                 "chat_id": TELEGRAM_ID,
                 "message_id": 10,
-                "text": "Registro confirmado: no almoço.",
+                "text": "✅ Confirmado: no almoço.",
             },
         )
         callback_update = TelegramUpdate.objects.get(update_id=7001)
@@ -1070,7 +1070,7 @@ class TelegramWebhookViewTests(APITestCase):
         )
         self.assertEqual(
             self.telegram.edited_messages[-1]["text"],
-            "Rascunho cancelado: salário.",
+            "🗑️ Cancelado: salário.",
         )
 
     def test_other_linked_user_cannot_confirm_draft(self):

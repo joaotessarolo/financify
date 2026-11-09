@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 import logging
 import re
+from time import monotonic
 import unicodedata
 import uuid
 from zoneinfo import ZoneInfo
@@ -71,6 +72,7 @@ from .accounts import (
     select_transaction_account,
 )
 from .queries import handle_financial_query
+from .observability import record_event
 from .models import (
     TelegramIdentity,
     TelegramOnboardingStep,
@@ -224,11 +226,13 @@ def _draft_reply(
 ) -> str:
     formatted_amount = f"{amount:.2f}".replace(".", ",")
     return (
-        f"Rascunho criado: {description} — {currency} {formatted_amount}.\n"
-        f"Conta: {account_name}.\n"
-        f"Categoria: {category_name}.\n"
-        f"Data: {occurred_label}.\n"
-        "Revise os dados e confirme ou cancele abaixo."
+        "📝 Revise o lançamento\n\n"
+        f"{description}\n"
+        f"Valor: {currency} {formatted_amount}\n"
+        f"Conta: {account_name}\n"
+        f"Categoria: {category_name}\n"
+        f"Data: {occurred_label}\n\n"
+        "Está tudo certo?"
     )
 
 
@@ -783,6 +787,7 @@ def handle_message(message: dict, *, process_voice: bool = False) -> DispatchRes
 
         try:
             extractor = get_transaction_extractor()
+            extraction_started = monotonic()
             extraction = extractor.extract(normalized_text)
             transfer_source = transfer_destination = None
             if extraction.kind == "TRANSFER":
@@ -814,12 +819,14 @@ def handle_message(message: dict, *, process_voice: bool = False) -> DispatchRes
                 conversation=conversation,
             )
         except TransactionExtractionProviderError:
+            record_event("extraction_failed", provider="configured")
             logger.exception("Transaction extraction provider failed.")
             return DispatchResult(
                 reply=AI_EXTRACTION_UNAVAILABLE_REPLY,
                 conversation=conversation,
             )
         except TextExtractionError:
+            record_event("extraction_failed", provider="local")
             return DispatchResult(
                 reply=TEXT_FORMAT_REPLY,
                 conversation=conversation,
@@ -860,6 +867,11 @@ def handle_message(message: dict, *, process_voice: bool = False) -> DispatchRes
                 user=identity.user,
                 description=extraction.description,
             )),
+        )
+        record_event(
+            "drafts_created",
+            draft_id=str(draft.id),
+            extraction_ms=int((monotonic() - extraction_started) * 1000),
         )
         return DispatchResult(
             reply=_draft_reply(
@@ -1004,7 +1016,12 @@ def handle_callback_query(callback: dict) -> DispatchResult:
             edit_text = "Este rascunho não pode mais ser confirmado."
             answer = "Não foi possível confirmar."
         else:
-            edit_text = f"Registro confirmado: {transaction.description}."
+            edit_text = f"✅ Confirmado: {transaction.description}."
+            record_event(
+                "drafts_confirmed",
+                draft_id=str(draft.id),
+                transaction_id=str(transaction.id),
+            )
             alert = budget_alert_for_transaction(transaction=transaction)
             if alert:
                 edit_text = f"{edit_text}\n\n{alert}"
@@ -1021,7 +1038,8 @@ def handle_callback_query(callback: dict) -> DispatchResult:
             edit_text = "Este rascunho não pode mais ser cancelado."
             answer = "Não foi possível cancelar."
         else:
-            edit_text = f"Rascunho cancelado: {draft.description}."
+            edit_text = f"🗑️ Cancelado: {draft.description}."
+            record_event("drafts_cancelled", draft_id=str(draft.id))
             answer = "Rascunho cancelado."
 
     return DispatchResult(
@@ -1060,6 +1078,7 @@ def _send_reply(
         )
         return True
     except ImproperlyConfigured:
+        record_event("outbound_failed", update_id=update_id, reason="configuration")
         logger.warning(
             "Telegram client not configured; reply for update %s skipped.",
             update_id,
@@ -1067,6 +1086,7 @@ def _send_reply(
         )
         return False
     except TelegramClientError as exc:
+        record_event("outbound_failed", update_id=update_id, reason="telegram")
         # Our client errors never contain the bot token or message text.
         logger.warning(
             "Failed to send reply for Telegram update %s: %s",
@@ -1076,6 +1096,7 @@ def _send_reply(
         )
         return False
     except Exception:
+        record_event("outbound_failed", update_id=update_id, reason="unexpected")
         logger.error(
             "Unexpected error sending reply for Telegram update %s.",
             update_id,
@@ -1155,15 +1176,23 @@ def process_update(payload, *, client: TelegramClient | None = None) -> bool:
     parsed = parse_update(payload)
     update = _register_update(parsed)
     if update is None:
+        record_event("updates_duplicate", update_id=parsed.update_id)
         return False
+    record_event("updates_accepted", update_id=parsed.update_id)
 
     result = DispatchResult()
     try:
         result = dispatch(parsed)
     except TelegramUpdateProcessingError as exc:
+        record_event(
+            "updates_failed", update_id=parsed.update_id, error_code=exc.error_code
+        )
         _finish_update(update, error_code=exc.error_code)
         result = DispatchResult(reply=ERROR_REPLIES.get(exc.error_code))
     except Exception:
+        record_event(
+            "updates_failed", update_id=parsed.update_id, error_code="internal_error"
+        )
         logger.error(
             "Unexpected error processing Telegram update %s.",
             parsed.update_id,
@@ -1173,6 +1202,7 @@ def process_update(payload, *, client: TelegramClient | None = None) -> bool:
         result = DispatchResult(reply=ERROR_REPLIES["internal_error"])
     else:
         _finish_update(update)
+        record_event("updates_completed", update_id=parsed.update_id)
 
     chat_id = _private_chat_id(parsed)
     if result.callback_query_id:

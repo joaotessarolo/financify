@@ -1,10 +1,12 @@
 import logging
+from time import monotonic
 
 from celery import shared_task
 
 from conversations.services import record_completed_outbound_text_message
 
 from .client import TelegramClientError, get_telegram_client
+from .observability import record_event
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +19,13 @@ logger = logging.getLogger(__name__)
 def process_voice_message(message: dict) -> None:
     from .webhook import handle_message
 
-    result = handle_message(message, process_voice=True)
+    started = monotonic()
+    try:
+        result = handle_message(message, process_voice=True)
+    except Exception:
+        record_event("voice_failed")
+        raise
+    record_event("voice_completed", duration_ms=int((monotonic() - started) * 1000))
     if not result.reply:
         return
     chat_id = message["chat"]["id"]
