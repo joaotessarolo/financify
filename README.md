@@ -139,6 +139,17 @@ uv run celery -A config worker --loglevel=INFO
 
 The development server is available at `http://127.0.0.1:8000/`.
 
+Start the web dashboard with Bun:
+
+```bash
+cd apps/web
+bun install
+bun run dev
+```
+
+The dashboard runs at `http://localhost:3000/` and proxies authenticated API
+requests to Django through `API_INTERNAL_URL`.
+
 ## Environment variables
 
 The committed `.env.example` documents the local configuration contract:
