@@ -169,6 +169,40 @@ class Category(models.Model):
         return self.name
 
 
+class Budget(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="budgets",
+    )
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.CASCADE,
+        related_name="budgets",
+    )
+    monthly_limit = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01"))],
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [  # noqa: RUF012
+            models.UniqueConstraint(
+                fields=["user", "category"],
+                name="ledger_budget_unique_category_per_user",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(monthly_limit__gt=Decimal("0.00")),
+                name="ledger_budget_monthly_limit_positive",
+            ),
+        ]
+
+
 class Transaction(models.Model):
     id = models.UUIDField(
         primary_key=True,

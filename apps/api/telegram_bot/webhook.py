@@ -10,6 +10,7 @@ Ordinary text from linked users is stored in the conversation history.
 
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from decimal import Decimal
 import logging
 import re
 import unicodedata
@@ -29,6 +30,7 @@ from ledger.categories import (
     ensure_default_categories,
     find_category,
 )
+from ledger.budgets import budget_alert_for_transaction, set_budget
 
 from conversations.models import (
     Conversation,
@@ -591,6 +593,39 @@ def handle_message(message: dict) -> DispatchResult:
             )
 
         normalized_command = normalize_account_name(normalized_text.rstrip("?"))
+        if normalized_command in {"meus orcamentos", "meus orçamentos"}:
+            budgets = identity.user.budgets.filter(is_active=True).select_related(
+                "category"
+            )
+            if not budgets.exists():
+                reply = "Você ainda não definiu orçamentos mensais."
+            else:
+                reply = "Seus orçamentos mensais:\n" + "\n".join(
+                    f"• {budget.category.name} · {identity.user.currency} "
+                    f"{budget.monthly_limit:.2f}"
+                    for budget in budgets
+                )
+            return DispatchResult(reply=reply, conversation=conversation)
+        budget_match = re.fullmatch(
+            r"definir\s+or[çc]amento\s+(.+?)\s+(\d+(?:[.,]\d{1,2})?)",
+            normalized_text,
+            flags=re.I,
+        )
+        if budget_match:
+            try:
+                budget = set_budget(
+                    user=identity.user,
+                    category_name=budget_match.group(1),
+                    monthly_limit=Decimal(budget_match.group(2).replace(",", ".")),
+                )
+            except ValueError:
+                reply = "Não encontrei essa categoria ou o limite não é válido."
+            else:
+                reply = (
+                    f"Orçamento de {budget.category.name} definido em "
+                    f"{identity.user.currency} {budget.monthly_limit:.2f} por mês."
+                )
+            return DispatchResult(reply=reply, conversation=conversation)
         if normalized_command in {"minhas recorrencias", "minhas recorrências"}:
             recurrences = identity.user.recurring_transactions.filter(
                 is_active=True
@@ -934,6 +969,9 @@ def handle_callback_query(callback: dict) -> DispatchResult:
             answer = "Não foi possível confirmar."
         else:
             edit_text = f"Registro confirmado: {transaction.description}."
+            alert = budget_alert_for_transaction(transaction=transaction)
+            if alert:
+                edit_text = f"{edit_text}\n\n{alert}"
             answer = "Registro confirmado."
     else:
         if draft.status == TransactionDraftStatus.REJECTED:
