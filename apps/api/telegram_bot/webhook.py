@@ -548,6 +548,7 @@ def handle_message(message: dict, *, process_voice: bool = False) -> DispatchRes
             conversation=conversation,
             content=text,
             message_type=message_type,
+            external_message_id=message.get("message_id"),
         )
 
         if identity.onboarding_step != TelegramOnboardingStep.COMPLETED:

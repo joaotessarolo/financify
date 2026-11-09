@@ -122,6 +122,7 @@ class Message(models.Model):
         blank=True,
         default="",
     )
+    external_message_id = models.BigIntegerField(null=True, blank=True)
     processed_at = models.DateTimeField(
         null=True,
         blank=True,
