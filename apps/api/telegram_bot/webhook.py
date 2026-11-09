@@ -62,6 +62,7 @@ from .accounts import (
     parse_create_account,
     select_transaction_account,
 )
+from .queries import handle_financial_query
 from .models import (
     TelegramIdentity,
     TelegramOnboardingStep,
@@ -533,6 +534,15 @@ def handle_message(message: dict) -> DispatchResult:
             )
 
         normalized_command = normalize_account_name(normalized_text.rstrip("?"))
+        financial_query_reply = handle_financial_query(
+            user=identity.user,
+            text=normalized_text,
+        )
+        if financial_query_reply is not None:
+            return DispatchResult(
+                reply=financial_query_reply,
+                conversation=conversation,
+            )
         if normalized_command == "minhas categorias":
             categories = ensure_default_categories(user=identity.user)
             return DispatchResult(
