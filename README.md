@@ -150,7 +150,7 @@ The committed `.env.example` documents the local configuration contract:
 | `TELEGRAM_API_MAX_RETRIES` | Retries for timeouts, rate limits, and server errors |
 | `TELEGRAM_API_RETRY_DELAY_SECONDS` | Initial exponential retry delay |
 | `TRANSACTION_DRAFT_TTL_SECONDS` | Lifetime of pending financial drafts |
-| `TRANSACTION_EXTRACTOR_BACKEND` | Transaction parser: `deterministic` or `openai` |
+| `TRANSACTION_EXTRACTOR_BACKEND` | Transaction parser: `deterministic`, `hybrid`, or `openai` |
 | `OPENAI_API_KEY` | OpenAI API key, required only by the `openai` parser |
 | `OPENAI_TRANSACTION_MODEL` | OpenAI model used for structured extraction |
 | `OPENAI_API_TIMEOUT_SECONDS` | Timeout for OpenAI extraction requests |
@@ -161,10 +161,10 @@ The committed `.env.example` documents the local configuration contract:
 The local `.env` file is intentionally ignored by Git. Production secrets must
 be supplied by the deployment platform or a dedicated secret manager.
 
-The deterministic parser remains the default. To accept freer natural language,
-set `TRANSACTION_EXTRACTOR_BACKEND=openai`, provide `OPENAI_API_KEY`, and restart
-the API or long-polling bot. Model output is schema-constrained, validated by the
-same financial limits as deterministic input, and still creates only a draft.
+The hybrid parser is the default: it handles known phrases locally and calls
+OpenAI only when the deterministic grammar cannot understand the message. With
+no API key it safely stays deterministic. Model output is schema-constrained,
+validated by the same financial limits, and still creates only a draft.
 
 ## Telegram operation
 

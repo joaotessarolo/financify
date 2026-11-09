@@ -4,6 +4,7 @@ from django.test import SimpleTestCase
 
 from ..extraction import (
     DeterministicTransactionExtractor,
+    FallbackTransactionExtractor,
     ExtractedTransaction,
     TextExtractionError,
     TransactionExtractor,
@@ -31,6 +32,21 @@ class ExtractTransactionFromTextTests(SimpleTestCase):
 
         self.assertIsInstance(extractor, DeterministicTransactionExtractor)
         self.assertEqual(extractor.extract("gastei 10").amount, Decimal("10.00"))
+
+    def test_fallback_is_only_called_when_primary_rejects_text(self):
+        primary = StubTransactionExtractor()
+        fallback = StubTransactionExtractor()
+        extractor = FallbackTransactionExtractor(primary=primary, fallback=fallback)
+        self.assertEqual(extractor.extract("local").description, "local")
+
+        class RejectingExtractor:
+            def extract(self, text):
+                raise TextExtractionError("unsupported")
+
+        extractor = FallbackTransactionExtractor(
+            primary=RejectingExtractor(), fallback=fallback
+        )
+        self.assertEqual(extractor.extract("fallback").description, "fallback")
 
     def test_accepts_natural_expense_forms(self):
         cases = (

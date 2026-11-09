@@ -7,6 +7,7 @@ from django.test import SimpleTestCase, override_settings
 from ..ai_extraction import AITransactionExtractor
 from ..extraction import (
     DeterministicTransactionExtractor,
+    FallbackTransactionExtractor,
     get_transaction_extractor,
 )
 from ..openai_extraction import (
@@ -88,3 +89,22 @@ class TransactionExtractorFactoryTests(SimpleTestCase):
     def test_rejects_unknown_backend(self):
         with self.assertRaises(ImproperlyConfigured):
             get_transaction_extractor()
+
+    @override_settings(
+        TRANSACTION_EXTRACTOR_BACKEND="hybrid",
+        OPENAI_API_KEY="",
+    )
+    def test_hybrid_without_key_stays_deterministic(self):
+        self.assertIsInstance(
+            get_transaction_extractor(), DeterministicTransactionExtractor
+        )
+
+    @override_settings(
+        TRANSACTION_EXTRACTOR_BACKEND="hybrid",
+        OPENAI_API_KEY="test-key",
+        OPENAI_TRANSACTION_MODEL="test-model",
+        OPENAI_API_TIMEOUT_SECONDS=4,
+    )
+    @patch("conversations.openai_extraction.OpenAIStructuredTransactionProvider")
+    def test_hybrid_with_key_builds_fallback(self, provider_class):
+        self.assertIsInstance(get_transaction_extractor(), FallbackTransactionExtractor)

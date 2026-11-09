@@ -194,7 +194,7 @@ TRANSACTION_DRAFT_TTL_SECONDS = env.int(
 
 TRANSACTION_EXTRACTOR_BACKEND = env(
     "TRANSACTION_EXTRACTOR_BACKEND",
-    default="deterministic",
+    default="hybrid",
 )
 
 OPENAI_API_KEY = env("OPENAI_API_KEY", default="")

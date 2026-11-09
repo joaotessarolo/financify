@@ -112,6 +112,18 @@ class DeterministicTransactionExtractor:
         )
 
 
+class FallbackTransactionExtractor:
+    def __init__(self, *, primary: TransactionExtractor, fallback: TransactionExtractor):
+        self.primary = primary
+        self.fallback = fallback
+
+    def extract(self, text: str) -> ExtractedTransaction:
+        try:
+            return self.primary.extract(text)
+        except TextExtractionError:
+            return self.fallback.extract(text)
+
+
 def get_transaction_extractor() -> TransactionExtractor:
     from django.conf import settings
     from django.core.exceptions import ImproperlyConfigured
@@ -119,21 +131,29 @@ def get_transaction_extractor() -> TransactionExtractor:
     backend = settings.TRANSACTION_EXTRACTOR_BACKEND
     if backend == "deterministic":
         return DeterministicTransactionExtractor()
-    if backend == "openai":
+    if backend in {"openai", "hybrid"}:
         if not settings.OPENAI_API_KEY:
+            if backend == "hybrid":
+                return DeterministicTransactionExtractor()
             raise ImproperlyConfigured(
                 "OPENAI_API_KEY is required for the OpenAI transaction extractor."
             )
         from .ai_extraction import AITransactionExtractor
         from .openai_extraction import OpenAIStructuredTransactionProvider
 
-        return AITransactionExtractor(
+        ai_extractor = AITransactionExtractor(
             provider=OpenAIStructuredTransactionProvider(
                 api_key=settings.OPENAI_API_KEY,
                 model=settings.OPENAI_TRANSACTION_MODEL,
                 timeout=settings.OPENAI_API_TIMEOUT_SECONDS,
             )
         )
+        if backend == "hybrid":
+            return FallbackTransactionExtractor(
+                primary=DeterministicTransactionExtractor(),
+                fallback=ai_extractor,
+            )
+        return ai_extractor
     raise ImproperlyConfigured(
         f"Unsupported TRANSACTION_EXTRACTOR_BACKEND: {backend!r}."
     )
