@@ -180,6 +180,24 @@ class TelegramWebhookViewTests(APITestCase):
         self.assertIn("Transferências", reply)
         self.assertIn("Todo lançamento vira rascunho", reply)
 
+    def test_disconnect_command_revokes_linked_identity(self):
+        identity = self._link_identity()
+
+        self._post(self._message_update(update_id=1003, text="/disconnect"))
+
+        identity.refresh_from_db()
+        self.assertIsNotNone(identity.revoked_at)
+        self.assertIn("desconectado", self.telegram.sent_messages[-1]["text"])
+
+    @override_settings(TELEGRAM_WEBHOOK_MAX_BYTES=10)
+    def test_webhook_rejects_oversized_body(self):
+        response = self._post(self._message_update(update_id=1004))
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        )
+
     @patch("telegram_bot.tasks.process_voice_message.delay")
     def test_voice_is_enqueued_without_transcription_in_webhook(self, delay):
         self._link_identity()

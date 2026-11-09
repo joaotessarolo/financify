@@ -7,7 +7,7 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from ..models import TelegramLinkToken
+from ..models import TelegramIdentity, TelegramLinkToken
 from ..services import create_telegram_link
 
 
@@ -132,3 +132,18 @@ class TelegramLinkViewTests(APITestCase):
             {"detail": "Telegram integration is not available."},
         )
         self.assertEqual(TelegramLinkToken.objects.count(), 0)
+
+    def test_authenticated_delete_revokes_active_identity(self):
+        identity = TelegramIdentity.objects.create(
+            user=self.user,
+            telegram_user_id=998877,
+            private_chat_id=998877,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.delete(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, {"revoked": True})
+        identity.refresh_from_db()
+        self.assertIsNotNone(identity.revoked_at)

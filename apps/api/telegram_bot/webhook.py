@@ -104,12 +104,14 @@ from .services import (
     UsedTelegramLinkTokenError,
     UserAlreadyLinkedToTelegramError,
     consume_telegram_link,
+    revoke_telegram_identity_by_chat,
 )
 
 logger = logging.getLogger(__name__)
 
 START_COMMAND = "/start"
 HELP_COMMAND = "/help"
+DISCONNECT_COMMAND = "/disconnect"
 
 HELP_REPLY = """Posso ajudar com:
 • Gastos: “gastei 40 no mercado”
@@ -889,6 +891,18 @@ def handle_message(message: dict, *, process_voice: bool = False) -> DispatchRes
         )
     if command == HELP_COMMAND:
         return DispatchResult(reply=HELP_REPLY)
+    if command == DISCONNECT_COMMAND:
+        revoked = revoke_telegram_identity_by_chat(
+            telegram_user_id=from_id,
+            private_chat_id=chat_id,
+        )
+        return DispatchResult(
+            reply=(
+                "Telegram desconectado do Financify."
+                if revoked
+                else "Este Telegram não está conectado ao Financify."
+            )
+        )
 
     raise TelegramUpdateProcessingError("unsupported_command")
 

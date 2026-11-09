@@ -208,3 +208,22 @@ def consume_telegram_link(
         token.save(update_fields=["used_at"])
 
         return identity
+
+
+def revoke_telegram_identity(*, user) -> bool:
+    now = timezone.now()
+    updated = TelegramIdentity.objects.filter(
+        user=user,
+        revoked_at__isnull=True,
+    ).update(revoked_at=now, updated_at=now)
+    return bool(updated)
+
+
+def revoke_telegram_identity_by_chat(*, telegram_user_id: int, private_chat_id: int) -> bool:
+    now = timezone.now()
+    updated = TelegramIdentity.objects.filter(
+        telegram_user_id=telegram_user_id,
+        private_chat_id=private_chat_id,
+        revoked_at__isnull=True,
+    ).update(revoked_at=now, updated_at=now)
+    return bool(updated)
