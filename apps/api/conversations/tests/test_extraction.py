@@ -87,6 +87,12 @@ class ExtractTransactionFromTextTests(SimpleTestCase):
         self.assertEqual(result.source_account_name, "Itaú")
         self.assertEqual(result.destination_account_name, "Inter")
 
+    def test_extracts_relative_date_without_polluting_description(self):
+        result = extract_transaction_from_text("gastei 40 no mercado ontem")
+
+        self.assertEqual(result.description, "no mercado")
+        self.assertEqual(result.occurred_on, "ontem")
+
     def test_is_case_insensitive_and_ignores_outer_whitespace(self):
         result = extract_transaction_from_text("  GASTEI 10 Café  ")
 

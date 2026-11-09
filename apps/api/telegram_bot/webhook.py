@@ -14,6 +14,7 @@ import logging
 import re
 import unicodedata
 import uuid
+from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ImproperlyConfigured
 from django.conf import settings
@@ -37,6 +38,7 @@ from conversations.models import (
     MessageType,
 )
 from conversations.transcription import TranscriptionError, get_voice_transcriber
+from conversations.dates import OccurrenceDateError, resolve_occurrence_date
 from conversations.extraction import (
     TextExtractionError,
     get_transaction_extractor,
@@ -194,13 +196,20 @@ class DispatchResult:
 
 
 def _draft_reply(
-    *, description: str, amount, currency: str, account_name: str, category_name: str
+    *,
+    description: str,
+    amount,
+    currency: str,
+    account_name: str,
+    category_name: str,
+    occurred_label: str,
 ) -> str:
     formatted_amount = f"{amount:.2f}".replace(".", ",")
     return (
         f"Rascunho criado: {description} — {currency} {formatted_amount}.\n"
         f"Conta: {account_name}.\n"
         f"Categoria: {category_name}.\n"
+        f"Data: {occurred_label}.\n"
         "Revise os dados e confirme ou cancele abaixo."
     )
 
@@ -572,6 +581,9 @@ def handle_message(message: dict) -> DispatchResult:
                     currency=draft.currency,
                     account_name=asset_entry.account.name,
                     category_name=draft.category.name if draft.category else "Outros",
+                    occurred_label=draft.occurred_at.astimezone(
+                        ZoneInfo(identity.user.timezone)
+                    ).strftime("%d/%m/%Y"),
                 ),
                 conversation=conversation,
                 reply_markup=_draft_reply_markup(draft.id),
@@ -721,10 +733,22 @@ def handle_message(message: dict) -> DispatchResult:
                 conversation=conversation,
             )
 
+        try:
+            resolved_occurred_at = resolve_occurrence_date(
+                expression=extraction.occurred_on,
+                reference=occurred_at,
+                timezone_name=identity.user.timezone,
+            )
+        except OccurrenceDateError:
+            return DispatchResult(
+                reply="Não consegui entender a data desse lançamento.",
+                conversation=conversation,
+            )
+
         draft = create_transaction_draft_from_extraction(
             source_message=source_message,
             extraction=extraction,
-            occurred_at=occurred_at,
+            occurred_at=resolved_occurred_at,
             transaction_account=transaction_account,
             transfer_source=transfer_source,
             transfer_destination=transfer_destination,
@@ -760,6 +784,9 @@ def handle_message(message: dict) -> DispatchResult:
                     )
                 ),
                 category_name=draft.category.name if draft.category else "Transferência",
+                occurred_label=draft.occurred_at.astimezone(
+                    ZoneInfo(identity.user.timezone)
+                ).strftime("%d/%m/%Y"),
             ),
             conversation=conversation,
             reply_markup=_draft_reply_markup(draft.id),

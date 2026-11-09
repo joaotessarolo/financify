@@ -19,6 +19,7 @@ class StructuredTransactionCandidate:
     category_name: str | None = None
     source_account_name: str | None = None
     destination_account_name: str | None = None
+    occurred_on: str | None = None
 
 
 class StructuredTransactionProvider(Protocol):
@@ -93,4 +94,5 @@ class AITransactionExtractor:
             ),
             source_account_name=candidate.source_account_name,
             destination_account_name=candidate.destination_account_name,
+            occurred_on=candidate.occurred_on,
         )

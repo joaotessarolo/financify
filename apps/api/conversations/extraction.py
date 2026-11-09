@@ -23,6 +23,7 @@ class ExtractedTransaction:
     category_name: str | None = None
     source_account_name: str | None = None
     destination_account_name: str | None = None
+    occurred_on: str | None = None
 
 
 @runtime_checkable
@@ -50,6 +51,11 @@ _TRANSFER_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 
+_DATE_SUFFIX_PATTERN = re.compile(
+    r"\s+(?P<date>hoje|ontem|(?:na\s+)?sexta(?:-feira)?|dia\s+\d{1,2}|m[eê]s\s+passado)$",
+    flags=re.IGNORECASE,
+)
+
 
 class DeterministicTransactionExtractor:
     """Extract the transaction grammar supported without external services."""
@@ -58,7 +64,13 @@ class DeterministicTransactionExtractor:
         if not isinstance(text, str):
             raise TextExtractionError("Transaction text must be a string.")
 
-        transfer_match = _TRANSFER_PATTERN.fullmatch(text.strip())
+        normalized_text = text.strip()
+        date_match = _DATE_SUFFIX_PATTERN.search(normalized_text)
+        occurred_on = date_match.group("date") if date_match else None
+        if date_match:
+            normalized_text = normalized_text[: date_match.start()].rstrip()
+
+        transfer_match = _TRANSFER_PATTERN.fullmatch(normalized_text)
         if transfer_match is not None:
             try:
                 amount = Decimal(transfer_match.group("amount").replace(",", "."))
@@ -76,9 +88,10 @@ class DeterministicTransactionExtractor:
                 description=f"Transferência de {source} para {destination}",
                 source_account_name=source,
                 destination_account_name=destination,
+                occurred_on=occurred_on,
             )
 
-        match = _TRANSACTION_PATTERN.fullmatch(text.strip())
+        match = _TRANSACTION_PATTERN.fullmatch(normalized_text)
         if match is None:
             raise TextExtractionError("Unsupported transaction text format.")
 
@@ -109,6 +122,7 @@ class DeterministicTransactionExtractor:
             kind=kind,
             amount=amount.quantize(Decimal("0.01")),
             description=description,
+            occurred_on=occurred_on,
         )
 
 

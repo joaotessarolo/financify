@@ -18,6 +18,7 @@ class OpenAITransactionCandidate(BaseModel):
     category_name: str | None
     source_account_name: str | None
     destination_account_name: str | None
+    occurred_on: str | None
 
 
 class OpenAIStructuredTransactionProvider:
@@ -40,6 +41,7 @@ class OpenAIStructuredTransactionProvider:
                     " Sugira em category_name uma categoria curta para o lançamento."
                     " Para transferência, use TRANSFER e informe source_account_name e "
                     "destination_account_name; não trate a movimentação como gasto."
+                    " Se houver uma data explícita, retorne-a em occurred_on como YYYY-MM-DD."
                 ),
                 input=text,
                 text_format=OpenAITransactionCandidate,
@@ -64,4 +66,5 @@ class OpenAIStructuredTransactionProvider:
             category_name=parsed.category_name,
             source_account_name=parsed.source_account_name,
             destination_account_name=parsed.destination_account_name,
+            occurred_on=parsed.occurred_on,
         )
