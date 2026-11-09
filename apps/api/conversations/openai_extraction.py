@@ -11,11 +11,13 @@ from .ai_extraction import (
 
 class OpenAITransactionCandidate(BaseModel):
     supported: bool
-    kind: Literal["EXPENSE", "INCOME"] | None
+    kind: Literal["EXPENSE", "INCOME", "TRANSFER"] | None
     amount: str | None
     description: str | None
     account_name: str | None
     category_name: str | None
+    source_account_name: str | None
+    destination_account_name: str | None
 
 
 class OpenAIStructuredTransactionProvider:
@@ -36,6 +38,8 @@ class OpenAIStructuredTransactionProvider:
                     "Quando houver uma conta explicitamente citada, copie seu nome para "
                     "account_name; caso contrário, retorne null."
                     " Sugira em category_name uma categoria curta para o lançamento."
+                    " Para transferência, use TRANSFER e informe source_account_name e "
+                    "destination_account_name; não trate a movimentação como gasto."
                 ),
                 input=text,
                 text_format=OpenAITransactionCandidate,
@@ -58,4 +62,6 @@ class OpenAIStructuredTransactionProvider:
             description=parsed.description,
             account_name=parsed.account_name,
             category_name=parsed.category_name,
+            source_account_name=parsed.source_account_name,
+            destination_account_name=parsed.destination_account_name,
         )

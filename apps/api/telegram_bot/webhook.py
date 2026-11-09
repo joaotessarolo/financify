@@ -626,16 +626,30 @@ def handle_message(message: dict) -> DispatchResult:
         try:
             extractor = get_transaction_extractor()
             extraction = extractor.extract(normalized_text)
-            transaction_account, cleaned_text, extraction = select_transaction_account(
-                user=identity.user,
-                text=normalized_text,
-                extraction=extraction,
-            )
-            if cleaned_text != normalized_text:
-                extraction = replace(
-                    extractor.extract(cleaned_text),
-                    account_name=transaction_account.name,
+            transfer_source = transfer_destination = None
+            if extraction.kind == "TRANSFER":
+                transfer_source = find_asset_account(
+                    user=identity.user,
+                    name=extraction.source_account_name,
                 )
+                transfer_destination = find_asset_account(
+                    user=identity.user,
+                    name=extraction.destination_account_name,
+                )
+                if transfer_source is None or transfer_destination is None:
+                    raise TelegramAccountError("Transfer account not found.")
+                transaction_account = None
+            else:
+                transaction_account, cleaned_text, extraction = select_transaction_account(
+                    user=identity.user,
+                    text=normalized_text,
+                    extraction=extraction,
+                )
+                if cleaned_text != normalized_text:
+                    extraction = replace(
+                        extractor.extract(cleaned_text),
+                        account_name=transaction_account.name,
+                    )
         except TelegramAccountError:
             return DispatchResult(
                 reply="Não encontrei a conta mencionada. Confira em “minhas contas”.",
@@ -658,18 +672,24 @@ def handle_message(message: dict) -> DispatchResult:
             extraction=extraction,
             occurred_at=occurred_at,
             transaction_account=transaction_account,
+            transfer_source=transfer_source,
+            transfer_destination=transfer_destination,
             category=(
+                None
+                if extraction.kind == "TRANSFER"
+                else (
                 find_category(user=identity.user, name=extraction.category_name)
                 if extraction.category_name
                 else classify_category(
                     user=identity.user,
                     description=extraction.description,
                 )
+                )
             )
-            or classify_category(
+            or (None if extraction.kind == "TRANSFER" else classify_category(
                 user=identity.user,
                 description=extraction.description,
-            ),
+            )),
         )
         return DispatchResult(
             reply=_draft_reply(
@@ -677,11 +697,15 @@ def handle_message(message: dict) -> DispatchResult:
                 amount=extraction.amount,
                 currency=draft.currency,
                 account_name=(
-                    transaction_account.name
-                    if transaction_account is not None
-                    else ensure_default_accounts(user=identity.user).primary.name
+                    f"{transfer_source.name} → {transfer_destination.name}"
+                    if extraction.kind == "TRANSFER"
+                    else (
+                        transaction_account.name
+                        if transaction_account is not None
+                        else ensure_default_accounts(user=identity.user).primary.name
+                    )
                 ),
-                category_name=draft.category.name,
+                category_name=draft.category.name if draft.category else "Transferência",
             ),
             conversation=conversation,
             reply_markup=_draft_reply_markup(draft.id),

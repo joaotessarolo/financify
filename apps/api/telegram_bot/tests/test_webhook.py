@@ -692,6 +692,43 @@ class TelegramWebhookViewTests(APITestCase):
         self.assertIn("Mercado", reply)
         self.assertIn("Transporte", reply)
 
+    def test_transfer_creates_asset_to_asset_draft(self):
+        self._link_identity()
+        primary = ensure_default_accounts(user=self.user).primary
+        primary.name = "Itaú"
+        primary.save(update_fields=["name", "updated_at"])
+        self._post(
+            self._message_update(
+                update_id=6100,
+                text="criar conta Inter com saldo 0",
+            )
+        )
+
+        self._post(
+            self._message_update(
+                update_id=6101,
+                text="transferi 500 do Itaú para o Inter",
+            )
+        )
+
+        draft = TransactionDraft.objects.get()
+        debit = draft.entries.get(side=EntrySide.DEBIT)
+        credit = draft.entries.get(side=EntrySide.CREDIT)
+        self.assertEqual(debit.account.name, "Inter")
+        self.assertEqual(credit.account.name, "Itaú")
+        self.assertIsNone(draft.category)
+        self.assertIn("Itaú → Inter", self.telegram.sent_messages[-1]["text"])
+
+        self._post(
+            self._callback_update(
+                draft=draft,
+                action="confirm",
+                update_id=6102,
+            )
+        )
+        self.assertEqual(calculate_account_balance(account=credit.account), -500)
+        self.assertEqual(calculate_account_balance(account=debit.account), 500)
+
     def test_natural_income_form_creates_draft(self):
         self._link_identity()
 

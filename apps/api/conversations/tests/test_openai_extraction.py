@@ -26,6 +26,8 @@ class OpenAIStructuredTransactionProviderTests(SimpleTestCase):
                 description="Mercado",
                 account_name="Nubank",
                 category_name="Mercado",
+                source_account_name=None,
+                destination_account_name=None,
             )
         )
         provider = OpenAIStructuredTransactionProvider(

@@ -11,6 +11,7 @@ class TextExtractionError(ValueError):
 class TransactionKind:
     EXPENSE = "EXPENSE"
     INCOME = "INCOME"
+    TRANSFER = "TRANSFER"
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +21,8 @@ class ExtractedTransaction:
     description: str
     account_name: str | None = None
     category_name: str | None = None
+    source_account_name: str | None = None
+    destination_account_name: str | None = None
 
 
 @runtime_checkable
@@ -40,6 +43,13 @@ _TRANSACTION_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 
+_TRANSFER_PATTERN = re.compile(
+    r"^(?:transferi|transfer[eê]ncia)\s+(?:de\s+)?(?:r\$\s*)?"
+    r"(?P<amount>\d+(?:[.,]\d{1,2})?)"
+    r"(?:\s+(?:reais?|brl))?\s+d[oa]\s+(?P<source>.+?)\s+para\s+(?:[oa]\s+)?(?P<destination>.+)$",
+    flags=re.IGNORECASE,
+)
+
 
 class DeterministicTransactionExtractor:
     """Extract the transaction grammar supported without external services."""
@@ -47,6 +57,26 @@ class DeterministicTransactionExtractor:
     def extract(self, text: str) -> ExtractedTransaction:
         if not isinstance(text, str):
             raise TextExtractionError("Transaction text must be a string.")
+
+        transfer_match = _TRANSFER_PATTERN.fullmatch(text.strip())
+        if transfer_match is not None:
+            try:
+                amount = Decimal(transfer_match.group("amount").replace(",", "."))
+            except InvalidOperation as exc:
+                raise TextExtractionError("Invalid transfer amount.") from exc
+            if amount <= 0 or amount > Decimal("999999999999.99"):
+                raise TextExtractionError("Transfer amount is outside valid bounds.")
+            source = transfer_match.group("source").strip()
+            destination = transfer_match.group("destination").strip()
+            if source.casefold() == destination.casefold():
+                raise TextExtractionError("Transfer accounts must be different.")
+            return ExtractedTransaction(
+                kind=TransactionKind.TRANSFER,
+                amount=amount.quantize(Decimal("0.01")),
+                description=f"Transferência de {source} para {destination}",
+                source_account_name=source,
+                destination_account_name=destination,
+            )
 
         match = _TRANSACTION_PATTERN.fullmatch(text.strip())
         if match is None:

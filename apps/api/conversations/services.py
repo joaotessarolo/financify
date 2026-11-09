@@ -109,6 +109,8 @@ def create_transaction_draft_from_extraction(
     occurred_at: datetime,
     transaction_account=None,
     category=None,
+    transfer_source=None,
+    transfer_destination=None,
 ) -> TransactionDraft:
     user = source_message.conversation.user
     ttl_seconds = settings.TRANSACTION_DRAFT_TTL_SECONDS
@@ -138,9 +140,9 @@ def create_transaction_draft_from_extraction(
             "Default account currencies do not match the user currency."
         )
 
-    if transaction_account is None:
+    if extraction.kind != TransactionKind.TRANSFER and transaction_account is None:
         transaction_account = accounts[AccountSystemRole.PRIMARY]
-    if (
+    if extraction.kind != TransactionKind.TRANSFER and (
         transaction_account.user_id != user.id
         or transaction_account.account_type != AccountType.ASSET
         or not transaction_account.is_active
@@ -160,7 +162,25 @@ def create_transaction_draft_from_extraction(
         expires_at=timezone.now() + timedelta(seconds=ttl_seconds),
     )
 
-    if extraction.kind == TransactionKind.EXPENSE:
+    if extraction.kind == TransactionKind.TRANSFER:
+        for account in (transfer_source, transfer_destination):
+            if (
+                account is None
+                or account.user_id != user.id
+                or account.account_type != AccountType.ASSET
+                or not account.is_active
+                or account.currency != user.currency
+            ):
+                raise DefaultAccountConfigurationError(
+                    "Transfer accounts must be active assets owned by the user."
+                )
+        if transfer_source.pk == transfer_destination.pk:
+            raise DefaultAccountConfigurationError(
+                "Transfer accounts must be different."
+            )
+        debit_account = transfer_destination
+        credit_account = transfer_source
+    elif extraction.kind == TransactionKind.EXPENSE:
         debit_account = accounts[AccountSystemRole.GENERAL_EXPENSE]
         credit_account = transaction_account
     elif extraction.kind == TransactionKind.INCOME:
@@ -252,6 +272,18 @@ def edit_transaction_draft(
             raise DraftEditingError("Invalid draft amount.")
         for entry in entries:
             entry.amount = amount.quantize(Decimal("0.01"))
+
+    is_transfer = all(
+        entry.account.account_type == AccountType.ASSET for entry in entries
+    )
+    if is_transfer:
+        if transaction_account is not None or kind is not None or category is not None:
+            raise DraftEditingError(
+                "Transfer account, kind, and category editing is not supported."
+            )
+        for entry in entries:
+            entry.save(update_fields=["amount", "updated_at"])
+        return locked
 
     current_kind = (
         TransactionKind.EXPENSE

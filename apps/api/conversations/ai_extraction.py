@@ -17,6 +17,8 @@ class StructuredTransactionCandidate:
     description: str | None = None
     account_name: str | None = None
     category_name: str | None = None
+    source_account_name: str | None = None
+    destination_account_name: str | None = None
 
 
 class StructuredTransactionProvider(Protocol):
@@ -43,7 +45,11 @@ class AITransactionExtractor:
         candidate = self.provider.extract(text.strip())
         if not candidate.supported:
             raise TextExtractionError("The message does not describe a transaction.")
-        if candidate.kind not in {TransactionKind.EXPENSE, TransactionKind.INCOME}:
+        if candidate.kind not in {
+            TransactionKind.EXPENSE,
+            TransactionKind.INCOME,
+            TransactionKind.TRANSFER,
+        }:
             raise TextExtractionError("Invalid transaction kind returned by provider.")
         if not isinstance(candidate.amount, str):
             raise TextExtractionError("Missing transaction amount.")
@@ -61,6 +67,14 @@ class AITransactionExtractor:
         if not description or len(description) > 255:
             raise TextExtractionError("Invalid transaction description.")
 
+        if candidate.kind == TransactionKind.TRANSFER and (
+            not candidate.source_account_name
+            or not candidate.destination_account_name
+            or candidate.source_account_name.strip().casefold()
+            == candidate.destination_account_name.strip().casefold()
+        ):
+            raise TextExtractionError("Invalid transfer accounts.")
+
         return ExtractedTransaction(
             kind=candidate.kind,
             amount=amount.quantize(Decimal("0.01")),
@@ -77,4 +91,6 @@ class AITransactionExtractor:
                 and candidate.category_name.strip()
                 else None
             ),
+            source_account_name=candidate.source_account_name,
+            destination_account_name=candidate.destination_account_name,
         )

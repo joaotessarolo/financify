@@ -61,6 +61,16 @@ class ExtractTransactionFromTextTests(SimpleTestCase):
                 self.assertEqual(result.amount, amount)
                 self.assertEqual(result.description, description)
 
+    def test_accepts_transfer_between_accounts(self):
+        result = extract_transaction_from_text(
+            "transferi 500 do Itaú para o Inter"
+        )
+
+        self.assertEqual(result.kind, TransactionKind.TRANSFER)
+        self.assertEqual(result.amount, Decimal("500.00"))
+        self.assertEqual(result.source_account_name, "Itaú")
+        self.assertEqual(result.destination_account_name, "Inter")
+
     def test_is_case_insensitive_and_ignores_outer_whitespace(self):
         result = extract_transaction_from_text("  GASTEI 10 Café  ")
 
