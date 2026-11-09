@@ -9,6 +9,7 @@ class FakeTelegramClient:
         *,
         error: TelegramClientError | None = None,
         updates: list[dict] | None = None,
+        files: dict[str, bytes] | None = None,
     ):
         self.sent_messages: list[dict] = []
         self.answered_callbacks: list[dict] = []
@@ -17,6 +18,7 @@ class FakeTelegramClient:
         self.edited_messages: list[dict] = []
         self._updates = list(updates or [])
         self._error = error
+        self._files = files or {}
         self._next_message_id = 1
 
     def send_message(
@@ -68,3 +70,11 @@ class FakeTelegramClient:
         self.edited_messages.append(
             {"chat_id": chat_id, "message_id": message_id, "text": text}
         )
+
+    def download_file(self, *, file_id: str, max_bytes: int) -> bytes:
+        if self._error is not None:
+            raise self._error
+        data = self._files[file_id]
+        if len(data) > max_bytes:
+            raise TelegramClientError("File too large.")
+        return data

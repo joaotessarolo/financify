@@ -78,13 +78,17 @@ def record_completed_text_message(
 
 
 def record_completed_inbound_text_message(
-    *, conversation: Conversation, content: str
+    *, conversation: Conversation, content: str, message_type=MessageType.TEXT
 ) -> Message:
-    return record_completed_text_message(
+    message = Message.objects.create(
         conversation=conversation,
         direction=MessageDirection.INBOUND,
+        message_type=message_type,
+        status=MessageStatus.COMPLETED,
         content=content,
+        processed_at=timezone.now(),
     )
+    return message
 
 
 def record_completed_outbound_text_message(

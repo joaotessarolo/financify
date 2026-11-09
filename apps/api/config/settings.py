@@ -208,3 +208,18 @@ OPENAI_API_TIMEOUT_SECONDS = env.float(
     "OPENAI_API_TIMEOUT_SECONDS",
     default=15.0,
 )
+
+OPENAI_TRANSCRIPTION_MODEL = env(
+    "OPENAI_TRANSCRIPTION_MODEL",
+    default="gpt-4o-mini-transcribe",
+)
+
+TELEGRAM_VOICE_MAX_BYTES = env.int(
+    "TELEGRAM_VOICE_MAX_BYTES",
+    default=5_000_000,
+)
+
+TELEGRAM_VOICE_MAX_DURATION_SECONDS = env.int(
+    "TELEGRAM_VOICE_MAX_DURATION_SECONDS",
+    default=120,
+)

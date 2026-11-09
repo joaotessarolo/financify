@@ -729,6 +729,29 @@ class TelegramWebhookViewTests(APITestCase):
         self.assertEqual(calculate_account_balance(account=credit.account), -500)
         self.assertEqual(calculate_account_balance(account=debit.account), 500)
 
+    @patch("telegram_bot.webhook.get_voice_transcriber")
+    def test_voice_message_uses_same_draft_pipeline(self, get_transcriber):
+        self._link_identity()
+        self.telegram._files["voice-file"] = b"ogg-audio"
+        get_transcriber.return_value.transcribe.return_value = (
+            "gastei 40 no mercado"
+        )
+        payload = self._message_update(update_id=6110, text="placeholder")
+        del payload["message"]["text"]
+        payload["message"]["voice"] = {
+            "file_id": "voice-file",
+            "file_size": 9,
+            "duration": 4,
+            "mime_type": "audio/ogg",
+        }
+
+        self._post(payload)
+
+        draft = TransactionDraft.objects.get()
+        self.assertEqual(draft.description, "no mercado")
+        self.assertEqual(draft.source_message.message_type, MessageType.VOICE)
+        self.assertEqual(draft.source_message.content, "gastei 40 no mercado")
+
     def test_natural_income_form_creates_draft(self):
         self._link_identity()
 

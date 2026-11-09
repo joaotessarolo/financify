@@ -16,6 +16,7 @@ import unicodedata
 import uuid
 
 from django.core.exceptions import ImproperlyConfigured
+from django.conf import settings
 from django.db import IntegrityError, transaction as db_transaction
 from django.utils import timezone
 
@@ -33,7 +34,9 @@ from conversations.models import (
     ConversationChannel,
     TransactionDraft,
     TransactionDraftStatus,
+    MessageType,
 )
+from conversations.transcription import TranscriptionError, get_voice_transcriber
 from conversations.extraction import (
     TextExtractionError,
     get_transaction_extractor,
@@ -440,9 +443,49 @@ def handle_message(message: dict) -> DispatchResult:
     if not _is_positive_int(chat_id) or not _is_positive_int(from_id):
         raise TelegramUpdateProcessingError("malformed_message")
 
+    identity = None
     text = message.get("text")
+    message_type = MessageType.TEXT
     if not isinstance(text, str) or not text.strip():
-        raise TelegramUpdateProcessingError("unsupported_message")
+        voice = message.get("voice")
+        if not isinstance(voice, dict):
+            raise TelegramUpdateProcessingError("unsupported_message")
+        file_id = voice.get("file_id")
+        file_size = voice.get("file_size")
+        duration = voice.get("duration")
+        mime_type = voice.get("mime_type", "audio/ogg")
+        if (
+            not isinstance(file_id, str)
+            or not file_id
+            or not _is_positive_int(file_size)
+            or not _is_positive_int(duration)
+            or file_size > settings.TELEGRAM_VOICE_MAX_BYTES
+            or duration > settings.TELEGRAM_VOICE_MAX_DURATION_SECONDS
+            or mime_type not in {"audio/ogg", "audio/opus"}
+        ):
+            raise TelegramUpdateProcessingError("unsupported_message")
+        identity = TelegramIdentity.objects.select_related("user").filter(
+            telegram_user_id=from_id,
+            private_chat_id=chat_id,
+            revoked_at__isnull=True,
+        ).first()
+        if identity is None:
+            raise TelegramUpdateProcessingError("telegram_not_linked")
+        try:
+            audio = get_telegram_client().download_file(
+                file_id=file_id,
+                max_bytes=settings.TELEGRAM_VOICE_MAX_BYTES,
+            )
+            text = get_voice_transcriber().transcribe(
+                audio=audio,
+                mime_type=mime_type,
+            )
+        except (TelegramClientError, TranscriptionError, ImproperlyConfigured):
+            logger.exception("Voice message processing failed.")
+            return DispatchResult(
+                reply="Não consegui processar esse áudio. Tente novamente ou envie por texto."
+            )
+        message_type = MessageType.VOICE
 
     normalized_text = text.strip()
     if not normalized_text.startswith("/"):
@@ -451,7 +494,7 @@ def handle_message(message: dict) -> DispatchResult:
             raise TelegramUpdateProcessingError("malformed_message")
         occurred_at = datetime.fromtimestamp(message_date, tz=UTC)
 
-        identity = TelegramIdentity.objects.select_related("user").filter(
+        identity = identity or TelegramIdentity.objects.select_related("user").filter(
             telegram_user_id=from_id,
             private_chat_id=chat_id,
             revoked_at__isnull=True,
@@ -466,6 +509,7 @@ def handle_message(message: dict) -> DispatchResult:
         source_message = record_completed_inbound_text_message(
             conversation=conversation,
             content=text,
+            message_type=message_type,
         )
 
         if identity.onboarding_step != TelegramOnboardingStep.COMPLETED:

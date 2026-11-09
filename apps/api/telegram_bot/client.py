@@ -75,6 +75,10 @@ class TelegramClient(Protocol):
         """Replace a bot message and remove its inline keyboard."""
         ...
 
+    def download_file(self, *, file_id: str, max_bytes: int) -> bytes:
+        """Download a Telegram file while enforcing an in-memory size limit."""
+        ...
+
 
 class HttpTelegramClient:
     def __init__(
@@ -194,6 +198,30 @@ class HttpTelegramClient:
                 "reply_markup": {"inline_keyboard": []},
             },
         )
+
+    def download_file(self, *, file_id: str, max_bytes: int) -> bytes:
+        if not file_id or max_bytes <= 0:
+            raise ValueError("file_id and max_bytes are required.")
+        result = self._call("getFile", {"file_id": file_id})
+        file_path = result.get("file_path") if isinstance(result, dict) else None
+        if not isinstance(file_path, str) or not file_path:
+            raise TelegramInvalidResponseError("Telegram getFile returned no path.")
+        request = urllib.request.Request(
+            f"{self._base_url}/file/bot{self._bot_token}/{file_path}",
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(
+                request,
+                timeout=self._timeout_seconds,
+                context=self._ssl_context,
+            ) as response:
+                data = response.read(max_bytes + 1)
+        except (TimeoutError, socket.timeout, urllib.error.URLError, OSError):
+            raise TelegramUnavailableError("Telegram file download failed.") from None
+        if len(data) > max_bytes:
+            raise TelegramAPIError("Telegram file exceeds the allowed size.")
+        return data
 
     def _call(
         self,

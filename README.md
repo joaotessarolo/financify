@@ -154,6 +154,9 @@ The committed `.env.example` documents the local configuration contract:
 | `OPENAI_API_KEY` | OpenAI API key, required only by the `openai` parser |
 | `OPENAI_TRANSACTION_MODEL` | OpenAI model used for structured extraction |
 | `OPENAI_API_TIMEOUT_SECONDS` | Timeout for OpenAI extraction requests |
+| `OPENAI_TRANSCRIPTION_MODEL` | OpenAI model used for Telegram voice transcription |
+| `TELEGRAM_VOICE_MAX_BYTES` | Maximum accepted Telegram voice file size |
+| `TELEGRAM_VOICE_MAX_DURATION_SECONDS` | Maximum accepted voice duration |
 
 The local `.env` file is intentionally ignored by Git. Production secrets must
 be supplied by the deployment platform or a dedicated secret manager.
