@@ -21,6 +21,12 @@ from django.utils import timezone
 
 from ledger.models import AccountSystemRole, AccountType
 from ledger.services import calculate_account_balance, ensure_default_accounts
+from ledger.categories import (
+    classify_category,
+    create_category,
+    ensure_default_categories,
+    find_category,
+)
 
 from conversations.models import (
     Conversation,
@@ -183,11 +189,14 @@ class DispatchResult:
     edit_text: str | None = None
 
 
-def _draft_reply(*, description: str, amount, currency: str, account_name: str) -> str:
+def _draft_reply(
+    *, description: str, amount, currency: str, account_name: str, category_name: str
+) -> str:
     formatted_amount = f"{amount:.2f}".replace(".", ",")
     return (
         f"Rascunho criado: {description} — {currency} {formatted_amount}.\n"
         f"Conta: {account_name}.\n"
+        f"Categoria: {category_name}.\n"
         "Revise os dados e confirme ou cancele abaixo."
     )
 
@@ -309,6 +318,7 @@ def _parse_draft_edit(text: str):
         ("account", r"trocar\s+conta\s+para\s+(.+)"),
         ("description", r"(?:alterar\s+)?descri(?:ç|c)[aã]o\s+(?:para\s+)?(.+)"),
         ("kind", r"trocar\s+tipo\s+para\s+(gasto|despesa|receita|ganho)"),
+        ("category", r"categoria\s+(?:para\s+)?(.+)"),
     )
     for field, pattern in patterns:
         match = re.fullmatch(pattern, text.strip(), flags=re.I)
@@ -484,6 +494,11 @@ def handle_message(message: dict) -> DispatchResult:
                     changes["transaction_account"] = account
                 elif field == "description":
                     changes["description"] = value
+                elif field == "category":
+                    category = find_category(user=identity.user, name=value)
+                    if category is None:
+                        raise ValueError("Category not found.")
+                    changes["category"] = category
                 else:
                     changes["kind"] = (
                         "INCOME"
@@ -491,7 +506,12 @@ def handle_message(message: dict) -> DispatchResult:
                         else "EXPENSE"
                     )
                 draft = edit_transaction_draft(draft=draft, **changes)
-            except (DraftEditingError, OnboardingParseError, TelegramAccountError):
+            except (
+                DraftEditingError,
+                OnboardingParseError,
+                TelegramAccountError,
+                ValueError,
+            ):
                 return DispatchResult(
                     reply="Não consegui aplicar essa alteração ao rascunho.",
                     conversation=conversation,
@@ -506,12 +526,36 @@ def handle_message(message: dict) -> DispatchResult:
                     amount=asset_entry.amount,
                     currency=draft.currency,
                     account_name=asset_entry.account.name,
+                    category_name=draft.category.name if draft.category else "Outros",
                 ),
                 conversation=conversation,
                 reply_markup=_draft_reply_markup(draft.id),
             )
 
         normalized_command = normalize_account_name(normalized_text.rstrip("?"))
+        if normalized_command == "minhas categorias":
+            categories = ensure_default_categories(user=identity.user)
+            return DispatchResult(
+                reply="Suas categorias:\n" + "\n".join(
+                    f"• {category.name}" for category in categories
+                ),
+                conversation=conversation,
+            )
+        create_category_match = re.fullmatch(
+            r"criar\s+categoria\s+(.+)", normalized_text, flags=re.I
+        )
+        if create_category_match:
+            try:
+                category = create_category(
+                    user=identity.user,
+                    name=create_category_match.group(1),
+                )
+            except ValueError:
+                reply = "Essa categoria já existe ou o nome não é válido."
+            else:
+                reply = f"Categoria criada: {category.name}."
+            return DispatchResult(reply=reply, conversation=conversation)
+
         if normalized_command == "minhas contas":
             accounts = identity.user.accounts.filter(
                 account_type=AccountType.ASSET,
@@ -614,6 +658,18 @@ def handle_message(message: dict) -> DispatchResult:
             extraction=extraction,
             occurred_at=occurred_at,
             transaction_account=transaction_account,
+            category=(
+                find_category(user=identity.user, name=extraction.category_name)
+                if extraction.category_name
+                else classify_category(
+                    user=identity.user,
+                    description=extraction.description,
+                )
+            )
+            or classify_category(
+                user=identity.user,
+                description=extraction.description,
+            ),
         )
         return DispatchResult(
             reply=_draft_reply(
@@ -625,6 +681,7 @@ def handle_message(message: dict) -> DispatchResult:
                     if transaction_account is not None
                     else ensure_default_accounts(user=identity.user).primary.name
                 ),
+                category_name=draft.category.name,
             ),
             conversation=conversation,
             reply_markup=_draft_reply_markup(draft.id),
@@ -718,7 +775,7 @@ def handle_callback_query(callback: dict) -> DispatchResult:
             reply=(
                 "Envie uma alteração: “alterar valor para 45”, "
                 "“trocar conta para Inter”, “descrição Mercado” ou "
-                "“trocar tipo para receita”."
+                "“trocar tipo para receita” ou “categoria Transporte”."
             ),
             conversation=conversation,
             callback_query_id=callback_id,

@@ -15,6 +15,7 @@ class OpenAITransactionCandidate(BaseModel):
     amount: str | None
     description: str | None
     account_name: str | None
+    category_name: str | None
 
 
 class OpenAIStructuredTransactionProvider:
@@ -34,6 +35,7 @@ class OpenAIStructuredTransactionProvider:
                     "uma transação, marque supported=false e deixe os outros campos nulos. "
                     "Quando houver uma conta explicitamente citada, copie seu nome para "
                     "account_name; caso contrário, retorne null."
+                    " Sugira em category_name uma categoria curta para o lançamento."
                 ),
                 input=text,
                 text_format=OpenAITransactionCandidate,
@@ -55,4 +57,5 @@ class OpenAIStructuredTransactionProvider:
             amount=parsed.amount,
             description=parsed.description,
             account_name=parsed.account_name,
+            category_name=parsed.category_name,
         )

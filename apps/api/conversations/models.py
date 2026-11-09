@@ -205,6 +205,13 @@ class TransactionDraft(models.Model):
         max_length=3,
         choices=Currency.choices,
     )
+    category = models.ForeignKey(
+        "ledger.Category",
+        on_delete=models.PROTECT,
+        related_name="drafts",
+        null=True,
+        blank=True,
+    )
     occurred_at = models.DateTimeField()
     status = models.CharField(
         max_length=20,

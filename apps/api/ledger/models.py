@@ -1,5 +1,6 @@
 from decimal import Decimal
 import uuid
+import unicodedata
 
 from django.conf import settings
 from django.core.validators import MinValueValidator
@@ -136,6 +137,38 @@ class Account(models.Model):
         return f"{self.name} ({self.currency})"
 
 
+class Category(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="categories"
+    )
+    name = models.CharField(max_length=80)
+    normalized_name = models.CharField(max_length=80, editable=False)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [  # noqa: RUF012
+            models.UniqueConstraint(
+                fields=["user", "normalized_name"],
+                name="ledger_category_unique_name_per_user",
+            )
+        ]
+
+    def save(self, *args, **kwargs):
+        normalized = unicodedata.normalize("NFKD", self.name.strip().casefold())
+        self.normalized_name = "".join(
+            character
+            for character in normalized
+            if not unicodedata.combining(character)
+        )
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
+
+
 class Transaction(models.Model):
     id = models.UUIDField(
         primary_key=True,
@@ -164,6 +197,13 @@ class Transaction(models.Model):
         max_length=20,
         choices=TransactionSource.choices,
         default=TransactionSource.MANUAL,
+    )
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.PROTECT,
+        related_name="transactions",
+        null=True,
+        blank=True,
     )
     posted_at = models.DateTimeField(
         null=True,

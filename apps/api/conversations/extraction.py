@@ -19,6 +19,7 @@ class ExtractedTransaction:
     amount: Decimal
     description: str
     account_name: str | None = None
+    category_name: str | None = None
 
 
 @runtime_checkable

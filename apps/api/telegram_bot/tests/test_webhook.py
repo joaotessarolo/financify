@@ -666,6 +666,32 @@ class TelegramWebhookViewTests(APITestCase):
         self.assertIn("alterar valor", self.telegram.sent_messages[-1]["text"])
         self.assertEqual(self.telegram.answered_callbacks[-1]["callback_query_id"], "callback-1")
 
+    def test_classifies_and_changes_draft_category(self):
+        self._link_identity()
+        self._post(self._message_update(update_id=6080, text="gastei 40 no mercado"))
+        draft = TransactionDraft.objects.get()
+        self.assertEqual(draft.category.name, "Mercado")
+        self.assertIn("Categoria: Mercado", self.telegram.sent_messages[-1]["text"])
+
+        self._post(
+            self._message_update(update_id=6081, text="criar categoria Compras da casa")
+        )
+        self._post(
+            self._message_update(update_id=6082, text="categoria Compras da casa")
+        )
+
+        draft.refresh_from_db()
+        self.assertEqual(draft.category.name, "Compras da casa")
+
+    def test_lists_default_categories(self):
+        self._link_identity()
+
+        self._post(self._message_update(update_id=6090, text="minhas categorias"))
+
+        reply = self.telegram.sent_messages[-1]["text"]
+        self.assertIn("Mercado", reply)
+        self.assertIn("Transporte", reply)
+
     def test_natural_income_form_creates_draft(self):
         self._link_identity()
 

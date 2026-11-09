@@ -108,6 +108,7 @@ def create_transaction_draft_from_extraction(
     extraction: ExtractedTransaction,
     occurred_at: datetime,
     transaction_account=None,
+    category=None,
 ) -> TransactionDraft:
     user = source_message.conversation.user
     ttl_seconds = settings.TRANSACTION_DRAFT_TTL_SECONDS
@@ -154,6 +155,7 @@ def create_transaction_draft_from_extraction(
         source_message=source_message,
         description=extraction.description,
         currency=user.currency,
+        category=category,
         occurred_at=occurred_at,
         expires_at=timezone.now() + timedelta(seconds=ttl_seconds),
     )
@@ -222,6 +224,7 @@ def edit_transaction_draft(
     description: str | None = None,
     transaction_account=None,
     kind: str | None = None,
+    category=None,
 ) -> TransactionDraft:
     locked = TransactionDraft.objects.select_for_update().get(pk=draft.pk)
     if locked.status != TransactionDraftStatus.PENDING or locked.expires_at <= timezone.now():
@@ -233,6 +236,12 @@ def edit_transaction_draft(
             raise DraftEditingError("Invalid draft description.")
         locked.description = description
         locked.save(update_fields=["description", "updated_at"])
+
+    if category is not None:
+        if category.user_id != locked.user_id or not category.is_active:
+            raise DraftEditingError("Invalid category.")
+        locked.category = category
+        locked.save(update_fields=["category", "updated_at"])
 
     entries = list(locked.entries.select_related("account"))
     if len(entries) != 2:
@@ -359,6 +368,7 @@ def confirm_transaction_draft(
                 occurred_at=locked_draft.occurred_at,
                 status=TransactionStatus.DRAFT,
                 source=TransactionSource.ASSISTANT,
+                category=locked_draft.category,
             )
 
             draft_entries = list(locked_draft.entries.all())

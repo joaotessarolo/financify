@@ -16,6 +16,7 @@ class StructuredTransactionCandidate:
     amount: str | None = None
     description: str | None = None
     account_name: str | None = None
+    category_name: str | None = None
 
 
 class StructuredTransactionProvider(Protocol):
@@ -68,6 +69,12 @@ class AITransactionExtractor:
                 candidate.account_name.strip()
                 if isinstance(candidate.account_name, str)
                 and candidate.account_name.strip()
+                else None
+            ),
+            category_name=(
+                candidate.category_name.strip()
+                if isinstance(candidate.category_name, str)
+                and candidate.category_name.strip()
                 else None
             ),
         )
