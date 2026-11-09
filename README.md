@@ -130,6 +130,13 @@ Start the API:
 uv run python manage.py runserver
 ```
 
+Start the background worker in another terminal:
+
+```bash
+cd apps/api
+uv run celery -A config worker --loglevel=INFO
+```
+
 The development server is available at `http://127.0.0.1:8000/`.
 
 ## Environment variables
@@ -157,6 +164,9 @@ The committed `.env.example` documents the local configuration contract:
 | `OPENAI_TRANSCRIPTION_MODEL` | OpenAI model used for Telegram voice transcription |
 | `TELEGRAM_VOICE_MAX_BYTES` | Maximum accepted Telegram voice file size |
 | `TELEGRAM_VOICE_MAX_DURATION_SECONDS` | Maximum accepted voice duration |
+| `TELEGRAM_ASYNC_VOICE_ENABLED` | Sends voice processing to the Celery worker |
+| `CELERY_BROKER_URL` | Redis broker used by background workers |
+| `CELERY_RESULT_BACKEND` | Redis database reserved for Celery results |
 
 The local `.env` file is intentionally ignored by Git. Production secrets must
 be supplied by the deployment platform or a dedicated secret manager.

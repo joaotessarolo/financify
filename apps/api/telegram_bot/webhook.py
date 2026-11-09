@@ -109,6 +109,19 @@ from .services import (
 logger = logging.getLogger(__name__)
 
 START_COMMAND = "/start"
+HELP_COMMAND = "/help"
+
+HELP_REPLY = """Posso ajudar com:
+• Gastos: “gastei 40 no mercado”
+• Receitas: “recebi 2500 de salário”
+• Transferências: “transferi 500 do Itaú para o Inter”
+• Contas: “minhas contas” ou “saldo do Inter”
+• Consultas: “quanto gastei este mês?” ou “extrato do Itaú”
+• Categorias: “minhas categorias”
+• Recorrências: “criar recorrência gasto 100 internet todo dia 10”
+• Orçamentos: “definir orçamento Mercado 1000”
+
+Também aceito áudio. Todo lançamento vira rascunho e só entra no saldo após sua confirmação."""
 
 LINK_SUCCESS_REPLY = (
     "Sua conta Financify foi conectada ao Telegram. "
@@ -441,7 +454,7 @@ def _private_chat_id(parsed: ParsedUpdate) -> int | None:
     return chat_id if _is_positive_int(chat_id) else None
 
 
-def handle_message(message: dict) -> DispatchResult:
+def handle_message(message: dict, *, process_voice: bool = False) -> DispatchResult:
     chat = message.get("chat")
     sender = message.get("from")
     if not isinstance(chat, dict) or not isinstance(sender, dict):
@@ -476,6 +489,13 @@ def handle_message(message: dict) -> DispatchResult:
             or mime_type not in {"audio/ogg", "audio/opus"}
         ):
             raise TelegramUpdateProcessingError("unsupported_message")
+        if settings.TELEGRAM_ASYNC_VOICE_ENABLED and not process_voice:
+            from .tasks import process_voice_message
+
+            process_voice_message.delay(message)
+            return DispatchResult(
+                reply="Áudio recebido. Vou processá-lo e envio o rascunho em seguida."
+            )
         identity = TelegramIdentity.objects.select_related("user").filter(
             telegram_user_id=from_id,
             private_chat_id=chat_id,
@@ -867,6 +887,8 @@ def handle_message(message: dict) -> DispatchResult:
         return handle_start_command(
             argument=argument, from_id=from_id, chat_id=chat_id
         )
+    if command == HELP_COMMAND:
+        return DispatchResult(reply=HELP_REPLY)
 
     raise TelegramUpdateProcessingError("unsupported_command")
 

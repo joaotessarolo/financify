@@ -172,6 +172,32 @@ class TelegramWebhookViewTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
+    def test_help_lists_supported_flows(self):
+        response = self._post(self._message_update(update_id=1001, text="/help"))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        reply = self.telegram.sent_messages[-1]["text"]
+        self.assertIn("Transferências", reply)
+        self.assertIn("Todo lançamento vira rascunho", reply)
+
+    @patch("telegram_bot.tasks.process_voice_message.delay")
+    def test_voice_is_enqueued_without_transcription_in_webhook(self, delay):
+        self._link_identity()
+        payload = self._message_update(update_id=1002, text="placeholder")
+        del payload["message"]["text"]
+        payload["message"]["voice"] = {
+            "file_id": "voice-file",
+            "file_size": 9,
+            "duration": 4,
+            "mime_type": "audio/ogg",
+        }
+
+        response = self._post(payload)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        delay.assert_called_once_with(payload["message"])
+        self.assertIn("Áudio recebido", self.telegram.sent_messages[-1]["text"])
+
     def test_get_method_is_not_allowed(self):
         response = self.client.get(
             self.url,
@@ -375,7 +401,7 @@ class TelegramWebhookViewTests(APITestCase):
         self.assertEqual(update.error_code, "telegram_not_linked")
 
     def test_unknown_command_is_recorded_as_unsupported(self):
-        self._post(self._message_update(text="/help"))
+        self._post(self._message_update(text="/unknown"))
 
         update = TelegramUpdate.objects.get()
         self.assertEqual(update.error_code, "unsupported_command")
@@ -729,6 +755,7 @@ class TelegramWebhookViewTests(APITestCase):
         self.assertEqual(calculate_account_balance(account=credit.account), -500)
         self.assertEqual(calculate_account_balance(account=debit.account), 500)
 
+    @override_settings(TELEGRAM_ASYNC_VOICE_ENABLED=False)
     @patch("telegram_bot.webhook.get_voice_transcriber")
     def test_voice_message_uses_same_draft_pipeline(self, get_transcriber):
         self._link_identity()

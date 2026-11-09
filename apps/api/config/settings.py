@@ -223,3 +223,21 @@ TELEGRAM_VOICE_MAX_DURATION_SECONDS = env.int(
     "TELEGRAM_VOICE_MAX_DURATION_SECONDS",
     default=120,
 )
+
+TELEGRAM_ASYNC_VOICE_ENABLED = env.bool(
+    "TELEGRAM_ASYNC_VOICE_ENABLED",
+    default=True,
+)
+
+CELERY_BROKER_URL = env(
+    "CELERY_BROKER_URL",
+    default="redis://localhost:6379/0",
+)
+CELERY_RESULT_BACKEND = env(
+    "CELERY_RESULT_BACKEND",
+    default="redis://localhost:6379/1",
+)
+CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", default=False)
+CELERY_TASK_IGNORE_RESULT = True
+CELERY_TASK_SERIALIZER = "json"
+CELERY_ACCEPT_CONTENT = ["json"]
