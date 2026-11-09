@@ -332,3 +332,55 @@ class DraftEntry(models.Model):
 
     def __str__(self):
         return f"{self.get_side_display()} {self.amount} ({self.account.name})"
+
+
+class RecurringTransaction(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="recurring_transactions",
+    )
+    kind = models.CharField(max_length=20)
+    amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01"))],
+    )
+    description = models.CharField(max_length=255)
+    account = models.ForeignKey(
+        Account,
+        on_delete=models.PROTECT,
+        related_name="recurring_transactions",
+    )
+    category = models.ForeignKey(
+        "ledger.Category",
+        on_delete=models.PROTECT,
+        related_name="recurring_transactions",
+        null=True,
+        blank=True,
+    )
+    day_of_month = models.PositiveSmallIntegerField()
+    next_run_on = models.DateField()
+    is_active = models.BooleanField(default=True)
+    last_draft = models.ForeignKey(
+        TransactionDraft,
+        on_delete=models.SET_NULL,
+        related_name="generated_by_recurrences",
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [  # noqa: RUF012
+            models.CheckConstraint(
+                condition=models.Q(kind__in=["EXPENSE", "INCOME"]),
+                name="conversations_recurrence_kind_supported",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(day_of_month__gte=1, day_of_month__lte=28),
+                name="conversations_recurrence_day_supported",
+            ),
+        ]

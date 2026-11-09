@@ -39,6 +39,7 @@ from conversations.models import (
 )
 from conversations.transcription import TranscriptionError, get_voice_transcriber
 from conversations.dates import OccurrenceDateError, resolve_occurrence_date
+from conversations.recurrences import RecurrenceError, create_recurrence, parse_recurrence
 from conversations.extraction import (
     TextExtractionError,
     get_transaction_extractor,
@@ -590,6 +591,40 @@ def handle_message(message: dict) -> DispatchResult:
             )
 
         normalized_command = normalize_account_name(normalized_text.rstrip("?"))
+        if normalized_command in {"minhas recorrencias", "minhas recorrências"}:
+            recurrences = identity.user.recurring_transactions.filter(
+                is_active=True
+            ).order_by("day_of_month", "description")
+            reply = "Suas recorrências:\n" + "\n".join(
+                f"• dia {item.day_of_month} · {identity.user.currency} "
+                f"{item.amount:.2f} · {item.description}"
+                for item in recurrences
+            )
+            if not recurrences.exists():
+                reply = "Você ainda não cadastrou recorrências."
+            return DispatchResult(reply=reply, conversation=conversation)
+        try:
+            recurrence_input = parse_recurrence(normalized_text)
+        except RecurrenceError:
+            return DispatchResult(
+                reply="Não consegui criar a recorrência. Use um dia entre 1 e 28.",
+                conversation=conversation,
+            )
+        if recurrence_input is not None:
+            recurrence = create_recurrence(
+                user=identity.user,
+                kind=recurrence_input[0],
+                amount=recurrence_input[1],
+                description=recurrence_input[2],
+                day=recurrence_input[3],
+            )
+            return DispatchResult(
+                reply=(
+                    f"Recorrência criada: {recurrence.description}, "
+                    f"todo dia {recurrence.day_of_month}."
+                ),
+                conversation=conversation,
+            )
         financial_query_reply = handle_financial_query(
             user=identity.user,
             text=normalized_text,
