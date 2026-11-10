@@ -72,3 +72,11 @@ class DashboardSummaryTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data, [])
+
+    def test_transaction_filters_accept_supported_query_parameters(self):
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse("ledger:transaction-list"),
+            {"q": "market", "kind": "EXPENSE", "from": "2026-01-01", "to": "2026-12-31"},
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)

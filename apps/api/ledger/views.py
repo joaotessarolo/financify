@@ -147,7 +147,37 @@ class TransactionListView(APIView):
     def get(self, request):
         transactions = request.user.transactions.filter(
             status=TransactionStatus.POSTED
-        ).select_related("category").prefetch_related("entries__account").order_by(
+        )
+        search = request.query_params.get("q", "").strip()
+        kind = request.query_params.get("kind", "").upper()
+        account_id = request.query_params.get("account", "")
+        if search:
+            transactions = transactions.filter(description__icontains=search)
+        if kind == "EXPENSE":
+            transactions = transactions.filter(
+                entries__account__system_role=AccountSystemRole.GENERAL_EXPENSE
+            )
+        elif kind == "INCOME":
+            transactions = transactions.filter(
+                entries__account__system_role=AccountSystemRole.GENERAL_INCOME
+            )
+        elif kind == "TRANSFER":
+            transactions = transactions.exclude(
+                entries__account__system_role__in=[
+                    AccountSystemRole.GENERAL_EXPENSE,
+                    AccountSystemRole.GENERAL_INCOME,
+                ]
+            )
+        if account_id:
+            transactions = transactions.filter(
+                entries__account_id=account_id,
+                entries__account__account_type=AccountType.ASSET,
+            )
+        if request.query_params.get("from"):
+            transactions = transactions.filter(occurred_at__date__gte=request.query_params["from"])
+        if request.query_params.get("to"):
+            transactions = transactions.filter(occurred_at__date__lte=request.query_params["to"])
+        transactions = transactions.distinct().select_related("category").prefetch_related("entries__account").order_by(
             "-occurred_at", "-created_at"
         )[:100]
         return Response(TransactionSerializer(transactions, many=True).data)
