@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
-from .models import Account, AccountSystemRole, AccountType, Category, EntrySide, Transaction
+from .models import Account, AccountSystemRole, AccountType, Budget, Category, EntrySide, Transaction
+from .budgets import monthly_category_spend
 from .services import calculate_account_balance
 
 
@@ -131,3 +132,16 @@ class CategorySerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         return Category.objects.create(user=self.context["request"].user, **validated_data)
+
+
+class BudgetSerializer(serializers.ModelSerializer):
+    category_id = serializers.UUIDField(source="category.id", read_only=True)
+    category = serializers.CharField(source="category.name", read_only=True)
+    spent = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Budget
+        fields = ("id", "category_id", "category", "monthly_limit", "spent")
+
+    def get_spent(self, budget):
+        return monthly_category_spend(budget=budget)

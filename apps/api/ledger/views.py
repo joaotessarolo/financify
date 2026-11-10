@@ -10,7 +10,7 @@ from rest_framework.views import APIView
 from .budgets import monthly_category_spend
 from .models import AccountSystemRole, AccountType, Budget, EntrySide, TransactionStatus
 from .services import calculate_account_balance
-from .serializers import AccountCreateSerializer, AccountSerializer, AccountUpdateSerializer, CategorySerializer, TransactionSerializer, TransactionUpdateSerializer
+from .serializers import AccountCreateSerializer, AccountSerializer, AccountUpdateSerializer, BudgetSerializer, CategorySerializer, TransactionSerializer, TransactionUpdateSerializer
 
 
 class DashboardSummaryView(APIView):
@@ -239,4 +239,41 @@ class CategoryDetailView(APIView):
             return Response(status=404)
         category.is_active = False
         category.save(update_fields=["is_active", "updated_at"])
+        return Response(status=204)
+
+
+class BudgetListCreateView(APIView):
+    def get(self, request):
+        budgets = request.user.budgets.filter(is_active=True).select_related(
+            "category", "user"
+        ).order_by("category__name")
+        return Response(BudgetSerializer(budgets, many=True).data)
+
+    def post(self, request):
+        category = request.user.categories.filter(
+            pk=request.data.get("category_id"), is_active=True
+        ).first()
+        if category is None:
+            return Response({"category_id": ["Invalid category."]}, status=400)
+        try:
+            limit = Decimal(str(request.data.get("monthly_limit")))
+        except Exception:
+            return Response({"monthly_limit": ["Invalid limit."]}, status=400)
+        if limit <= 0:
+            return Response({"monthly_limit": ["Limit must be positive."]}, status=400)
+        budget, _ = Budget.objects.update_or_create(
+            user=request.user,
+            category=category,
+            defaults={"monthly_limit": limit, "is_active": True},
+        )
+        return Response(BudgetSerializer(budget).data, status=201)
+
+
+class BudgetDetailView(APIView):
+    def delete(self, request, budget_id):
+        budget = request.user.budgets.filter(pk=budget_id, is_active=True).first()
+        if budget is None:
+            return Response(status=404)
+        budget.is_active = False
+        budget.save(update_fields=["is_active", "updated_at"])
         return Response(status=204)

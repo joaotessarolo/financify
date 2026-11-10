@@ -97,3 +97,21 @@ class DashboardSummaryTests(APITestCase):
         url = reverse("ledger:category-detail", args=[created.data["id"]])
         self.assertEqual(self.client.patch(url, {"name": "Animais"}).data["name"], "Animais")
         self.assertEqual(self.client.delete(url).status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_sets_and_removes_monthly_budget(self):
+        from ledger.categories import ensure_default_categories
+
+        category = ensure_default_categories(user=self.user)[0]
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("ledger:budget-list"),
+            {"category_id": category.id, "monthly_limit": "500.00"},
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["monthly_limit"], "500.00")
+        self.assertEqual(
+            self.client.delete(
+                reverse("ledger:budget-detail", args=[response.data["id"]])
+            ).status_code,
+            status.HTTP_204_NO_CONTENT,
+        )
