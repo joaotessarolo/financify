@@ -20,7 +20,8 @@ export default function LoginPage() {
         method: "POST",
         body: JSON.stringify({ email: data.get("email"), password: data.get("password") }),
       });
-      router.replace("/");
+      const destination = new URLSearchParams(window.location.search).get("next");
+      router.replace(destination?.startsWith("/") ? destination : "/");
     } catch {
       setError("Não foi possível entrar. Confira seu e-mail e sua senha.");
     } finally {
