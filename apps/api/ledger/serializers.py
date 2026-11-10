@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Account, AccountSystemRole, AccountType, EntrySide, Transaction
+from .models import Account, AccountSystemRole, AccountType, Category, EntrySide, Transaction
 from .services import calculate_account_balance
 
 
@@ -108,3 +108,26 @@ class TransactionUpdateSerializer(serializers.ModelSerializer):
         if not value:
             raise serializers.ValidationError("Description cannot be empty.")
         return value
+
+
+class CategorySerializer(serializers.ModelSerializer):
+    transaction_count = serializers.IntegerField(read_only=True, default=0)
+
+    class Meta:
+        model = Category
+        fields = ("id", "name", "is_active", "transaction_count")
+        read_only_fields = ("is_active",)
+
+    def validate_name(self, value):
+        value = value.strip()
+        user = self.context["request"].user
+        from .categories import normalize_category_name
+        queryset = user.categories.filter(normalized_name=normalize_category_name(value))
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError("A category with this name already exists.")
+        return value
+
+    def create(self, validated_data):
+        return Category.objects.create(user=self.context["request"].user, **validated_data)

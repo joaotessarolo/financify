@@ -89,3 +89,11 @@ class DashboardSummaryTests(APITestCase):
             reverse("ledger:transaction-detail", args=[uuid.uuid4()])
         )
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_manages_categories_for_authenticated_user(self):
+        self.client.force_login(self.user)
+        created = self.client.post(reverse("ledger:category-list"), {"name": "Pets"})
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        url = reverse("ledger:category-detail", args=[created.data["id"]])
+        self.assertEqual(self.client.patch(url, {"name": "Animais"}).data["name"], "Animais")
+        self.assertEqual(self.client.delete(url).status_code, status.HTTP_204_NO_CONTENT)

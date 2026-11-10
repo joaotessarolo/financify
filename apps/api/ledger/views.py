@@ -2,7 +2,7 @@ from datetime import datetime, time
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from django.db.models import Sum
+from django.db.models import Count, Sum
 from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -10,7 +10,7 @@ from rest_framework.views import APIView
 from .budgets import monthly_category_spend
 from .models import AccountSystemRole, AccountType, Budget, EntrySide, TransactionStatus
 from .services import calculate_account_balance
-from .serializers import AccountCreateSerializer, AccountSerializer, AccountUpdateSerializer, TransactionSerializer, TransactionUpdateSerializer
+from .serializers import AccountCreateSerializer, AccountSerializer, AccountUpdateSerializer, CategorySerializer, TransactionSerializer, TransactionUpdateSerializer
 
 
 class DashboardSummaryView(APIView):
@@ -142,7 +142,6 @@ class AccountDetailView(APIView):
         account.save(update_fields=["is_active", "updated_at"])
         return Response(status=204)
 
-
 class TransactionListView(APIView):
     def get(self, request):
         transactions = request.user.transactions.filter(
@@ -203,3 +202,41 @@ class TransactionDetailView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(TransactionSerializer(transaction).data)
+
+
+class CategoryListCreateView(APIView):
+    def get(self, request):
+        categories = request.user.categories.filter(is_active=True).annotate(
+            transaction_count=Count("transactions")
+        ).order_by("name")
+        return Response(CategorySerializer(categories, many=True).data)
+
+    def post(self, request):
+        serializer = CategorySerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        category = serializer.save()
+        return Response(CategorySerializer(category).data, status=201)
+
+
+class CategoryDetailView(APIView):
+    def get_category(self, request, category_id):
+        return request.user.categories.filter(pk=category_id, is_active=True).first()
+
+    def patch(self, request, category_id):
+        category = self.get_category(request, category_id)
+        if category is None:
+            return Response(status=404)
+        serializer = CategorySerializer(
+            category, data=request.data, partial=True, context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(CategorySerializer(category).data)
+
+    def delete(self, request, category_id):
+        category = self.get_category(request, category_id)
+        if category is None:
+            return Response(status=404)
+        category.is_active = False
+        category.save(update_fields=["is_active", "updated_at"])
+        return Response(status=204)
