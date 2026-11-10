@@ -38,3 +38,18 @@ class AccountCreateSerializer(serializers.Serializer):
         )
         record_opening_balance(account=account, balance=validated_data["opening_balance"])
         return account
+
+
+class AccountUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Account
+        fields = ("name",)
+
+    def validate_name(self, value):
+        value = value.strip()
+        user = self.context["request"].user
+        if user.accounts.filter(name__iexact=value, is_active=True).exclude(
+            pk=self.instance.pk
+        ).exists():
+            raise serializers.ValidationError("An active account with this name already exists.")
+        return value

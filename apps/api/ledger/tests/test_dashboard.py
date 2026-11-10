@@ -42,3 +42,26 @@ class DashboardSummaryTests(APITestCase):
         self.assertEqual(len(response.data), 1)
         self.assertTrue(response.data[0]["is_primary"])
         self.assertEqual(response.data[0]["balance"], Decimal("0.00"))
+
+    def test_creates_renames_and_archives_additional_account(self):
+        self.client.force_login(self.user)
+        created = self.client.post(
+            reverse("ledger:account-list"),
+            {"name": "Inter", "opening_balance": "500.00"},
+        )
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        account_url = reverse("ledger:account-detail", args=[created.data["id"]])
+
+        renamed = self.client.patch(account_url, {"name": "Inter PJ"})
+        self.assertEqual(renamed.status_code, status.HTTP_200_OK)
+        self.assertEqual(renamed.data["name"], "Inter PJ")
+
+        archived = self.client.delete(account_url)
+        self.assertEqual(archived.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(self.client.get(reverse("ledger:account-list")).data[0]["name"], "Conta principal")
+
+    def test_refuses_to_archive_primary_account(self):
+        self.client.force_login(self.user)
+        primary = self.user.accounts.get(system_role="PRIMARY")
+        response = self.client.delete(reverse("ledger:account-detail", args=[primary.id]))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

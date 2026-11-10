@@ -10,7 +10,7 @@ from rest_framework.views import APIView
 from .budgets import monthly_category_spend
 from .models import AccountSystemRole, AccountType, Budget, EntrySide, TransactionStatus
 from .services import calculate_account_balance
-from .serializers import AccountCreateSerializer, AccountSerializer
+from .serializers import AccountCreateSerializer, AccountSerializer, AccountUpdateSerializer
 
 
 class DashboardSummaryView(APIView):
@@ -111,3 +111,33 @@ class AccountListCreateView(APIView):
         serializer.is_valid(raise_exception=True)
         account = serializer.save()
         return Response(AccountSerializer(account).data, status=201)
+
+
+class AccountDetailView(APIView):
+    def get_account(self, request, account_id):
+        return request.user.accounts.filter(
+            pk=account_id, account_type=AccountType.ASSET, is_active=True
+        ).first()
+
+    def patch(self, request, account_id):
+        account = self.get_account(request, account_id)
+        if account is None:
+            return Response(status=404)
+        serializer = AccountUpdateSerializer(
+            account, data=request.data, partial=True, context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(AccountSerializer(account).data)
+
+    def delete(self, request, account_id):
+        account = self.get_account(request, account_id)
+        if account is None:
+            return Response(status=404)
+        if account.system_role == AccountSystemRole.PRIMARY:
+            return Response(
+                {"detail": "The primary account cannot be archived."}, status=400
+            )
+        account.is_active = False
+        account.save(update_fields=["is_active", "updated_at"])
+        return Response(status=204)
