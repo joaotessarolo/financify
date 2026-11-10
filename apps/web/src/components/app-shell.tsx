@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { useSession } from "@/components/session-provider";
+import { Button } from "@/components/ui";
 
 const navigation = [
   { href: "/", label: "Visão geral", icon: "⌂" },
@@ -15,6 +17,9 @@ const navigation = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const { user, loading, logout } = useSession();
+  const name = [user?.first_name, user?.last_name].filter(Boolean).join(" ") || user?.email || "Sua conta";
+  const initials = user?.first_name || user?.email ? (user.first_name || user.email).slice(0, 2).toUpperCase() : "…";
 
   return (
     <div className="dashboard-shell">
@@ -35,8 +40,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           })}
         </nav>
         <div className="sidebar-foot">
-          <span className="avatar" aria-hidden="true">JT</span>
-          <span><strong>Sua conta</strong><small>Perfil e segurança</small></span>
+          <span className="avatar" aria-hidden="true">{initials}</span>
+          <span><strong>{loading ? "Carregando…" : name}</strong><small>{user?.email ?? "Perfil e segurança"}</small></span>
+          <Button className="logout-button" variant="ghost" onClick={logout} aria-label="Sair">↪</Button>
         </div>
       </aside>
       <div className="content">{children}</div>
