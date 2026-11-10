@@ -21,6 +21,15 @@ WEBHOOK_SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token"
 class TelegramLinkView(APIView):
     permission_classes = [IsAuthenticated]
 
+    def get(self, request):
+        identity = getattr(request.user, "telegram_identity", None)
+        return Response(
+            {
+                "connected": bool(identity and identity.revoked_at is None),
+                "linked_at": identity.linked_at if identity and identity.revoked_at is None else None,
+            }
+        )
+
     def post(self, request):
         if not allow_request(
             scope="telegram-link",
