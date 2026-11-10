@@ -96,3 +96,15 @@ class TransactionSerializer(serializers.ModelSerializer):
             for entry in self._entries(transaction)
             if entry.account.account_type == AccountType.ASSET
         ]
+
+
+class TransactionUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Transaction
+        fields = ("description", "occurred_at")
+
+    def validate_description(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Description cannot be empty.")
+        return value

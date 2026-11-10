@@ -80,3 +80,12 @@ class DashboardSummaryTests(APITestCase):
             {"q": "market", "kind": "EXPENSE", "from": "2026-01-01", "to": "2026-12-31"},
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_transaction_detail_is_scoped_to_authenticated_user(self):
+        import uuid
+
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse("ledger:transaction-detail", args=[uuid.uuid4()])
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)

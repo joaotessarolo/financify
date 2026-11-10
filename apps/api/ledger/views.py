@@ -10,7 +10,7 @@ from rest_framework.views import APIView
 from .budgets import monthly_category_spend
 from .models import AccountSystemRole, AccountType, Budget, EntrySide, TransactionStatus
 from .services import calculate_account_balance
-from .serializers import AccountCreateSerializer, AccountSerializer, AccountUpdateSerializer, TransactionSerializer
+from .serializers import AccountCreateSerializer, AccountSerializer, AccountUpdateSerializer, TransactionSerializer, TransactionUpdateSerializer
 
 
 class DashboardSummaryView(APIView):
@@ -181,3 +181,25 @@ class TransactionListView(APIView):
             "-occurred_at", "-created_at"
         )[:100]
         return Response(TransactionSerializer(transactions, many=True).data)
+
+
+class TransactionDetailView(APIView):
+    def get_transaction(self, request, transaction_id):
+        return request.user.transactions.filter(
+            pk=transaction_id, status=TransactionStatus.POSTED
+        ).select_related("category").prefetch_related("entries__account").first()
+
+    def get(self, request, transaction_id):
+        transaction = self.get_transaction(request, transaction_id)
+        if transaction is None:
+            return Response(status=404)
+        return Response(TransactionSerializer(transaction).data)
+
+    def patch(self, request, transaction_id):
+        transaction = self.get_transaction(request, transaction_id)
+        if transaction is None:
+            return Response(status=404)
+        serializer = TransactionUpdateSerializer(transaction, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(TransactionSerializer(transaction).data)

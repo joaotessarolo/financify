@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import AccountDetailView, AccountListCreateView, DashboardSummaryView, TransactionListView
+from .views import AccountDetailView, AccountListCreateView, DashboardSummaryView, TransactionDetailView, TransactionListView
 
 app_name = "ledger"
 
@@ -9,4 +9,5 @@ urlpatterns = [
     path("accounts/", AccountListCreateView.as_view(), name="account-list"),
     path("accounts/<uuid:account_id>/", AccountDetailView.as_view(), name="account-detail"),
     path("transactions/", TransactionListView.as_view(), name="transaction-list"),
+    path("transactions/<uuid:transaction_id>/", TransactionDetailView.as_view(), name="transaction-detail"),
 ]
