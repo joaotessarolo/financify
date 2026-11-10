@@ -33,6 +33,7 @@ class DashboardSummaryTests(APITestCase):
         self.assertEqual(response.data["currency"], "BRL")
         self.assertEqual(len(response.data["accounts"]), 1)
         self.assertEqual(response.data["month"]["net"], 0)
+        self.assertEqual(response.data["spending_by_category"], [])
 
     def test_lists_authenticated_users_asset_accounts(self):
         self.client.force_login(self.user)

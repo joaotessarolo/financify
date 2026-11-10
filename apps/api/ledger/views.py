@@ -2,7 +2,7 @@ from datetime import datetime, time
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from django.db.models import Count, Sum
+from django.db.models import Count, Q, Sum
 from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -49,6 +49,23 @@ class DashboardSummaryView(APIView):
             entries__account__system_role=AccountSystemRole.GENERAL_EXPENSE,
             entries__side=EntrySide.DEBIT,
         ).aggregate(total=Sum("entries__amount"))["total"] or Decimal("0.00")
+        spending_by_category = (
+            posted.filter(
+                entries__account__system_role=AccountSystemRole.GENERAL_EXPENSE,
+                entries__side=EntrySide.DEBIT,
+            )
+            .values("category__name")
+            .annotate(
+                total=Sum(
+                    "entries__amount",
+                    filter=Q(
+                        entries__account__system_role=AccountSystemRole.GENERAL_EXPENSE,
+                        entries__side=EntrySide.DEBIT,
+                    ),
+                )
+            )
+            .order_by("-total")[:6]
+        )
         recent = user.transactions.filter(status=TransactionStatus.POSTED).select_related(
             "category"
         ).order_by("-occurred_at")[:10]
@@ -70,6 +87,13 @@ class DashboardSummaryView(APIView):
                     "expenses": expenses,
                     "net": income - expenses,
                 },
+                "spending_by_category": [
+                    {
+                        "category": item["category__name"] or "Sem categoria",
+                        "amount": item["total"],
+                    }
+                    for item in spending_by_category
+                ],
                 "recent_transactions": [
                     {
                         "id": str(item.id),
