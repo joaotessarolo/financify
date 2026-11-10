@@ -34,15 +34,13 @@ class TelegramLinkViewTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(TelegramLinkToken.objects.count(), 0)
 
-    def test_get_method_is_not_allowed(self):
+    def test_get_returns_connection_status(self):
         self.client.force_login(self.user)
 
         response = self.client.get(self.url)
 
-        self.assertEqual(
-            response.status_code,
-            status.HTTP_405_METHOD_NOT_ALLOWED,
-        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, {"connected": False, "linked_at": None})
 
     @patch(
         "telegram_bot.services.secrets.token_urlsafe",
