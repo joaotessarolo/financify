@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from rest_framework import status
@@ -31,3 +33,12 @@ class DashboardSummaryTests(APITestCase):
         self.assertEqual(response.data["currency"], "BRL")
         self.assertEqual(len(response.data["accounts"]), 1)
         self.assertEqual(response.data["month"]["net"], 0)
+
+    def test_lists_authenticated_users_asset_accounts(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("ledger:account-list"))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertTrue(response.data[0]["is_primary"])
+        self.assertEqual(response.data[0]["balance"], Decimal("0.00"))

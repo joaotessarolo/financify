@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 from .budgets import monthly_category_spend
 from .models import AccountSystemRole, AccountType, Budget, EntrySide, TransactionStatus
 from .services import calculate_account_balance
+from .serializers import AccountCreateSerializer, AccountSerializer
 
 
 class DashboardSummaryView(APIView):
@@ -96,3 +97,17 @@ class DashboardSummaryView(APIView):
                 ],
             }
         )
+
+
+class AccountListCreateView(APIView):
+    def get(self, request):
+        accounts = request.user.accounts.filter(
+            account_type=AccountType.ASSET, is_active=True
+        ).order_by("created_at")
+        return Response(AccountSerializer(accounts, many=True).data)
+
+    def post(self, request):
+        serializer = AccountCreateSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        account = serializer.save()
+        return Response(AccountSerializer(account).data, status=201)
