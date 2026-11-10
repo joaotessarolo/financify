@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from .models import Account, AccountSystemRole, AccountType, Budget, Category, EntrySide, Transaction
 from .budgets import monthly_category_spend
+from conversations.models import RecurringTransaction
 from .services import calculate_account_balance
 
 
@@ -145,3 +146,12 @@ class BudgetSerializer(serializers.ModelSerializer):
 
     def get_spent(self, budget):
         return monthly_category_spend(budget=budget)
+
+
+class RecurringTransactionSerializer(serializers.ModelSerializer):
+    account = serializers.CharField(source="account.name", read_only=True)
+    category = serializers.CharField(source="category.name", read_only=True, allow_null=True)
+
+    class Meta:
+        model = RecurringTransaction
+        fields = ("id", "kind", "amount", "description", "account", "category", "day_of_month", "next_run_on", "is_active")

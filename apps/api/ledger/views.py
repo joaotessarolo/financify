@@ -10,7 +10,9 @@ from rest_framework.views import APIView
 from .budgets import monthly_category_spend
 from .models import AccountSystemRole, AccountType, Budget, EntrySide, TransactionStatus
 from .services import calculate_account_balance
-from .serializers import AccountCreateSerializer, AccountSerializer, AccountUpdateSerializer, BudgetSerializer, CategorySerializer, TransactionSerializer, TransactionUpdateSerializer
+from .serializers import AccountCreateSerializer, AccountSerializer, AccountUpdateSerializer, BudgetSerializer, CategorySerializer, RecurringTransactionSerializer, TransactionSerializer, TransactionUpdateSerializer
+from conversations.extraction import TransactionKind
+from conversations.recurrences import create_recurrence
 
 
 class DashboardSummaryView(APIView):
@@ -276,4 +278,49 @@ class BudgetDetailView(APIView):
             return Response(status=404)
         budget.is_active = False
         budget.save(update_fields=["is_active", "updated_at"])
+        return Response(status=204)
+
+
+class RecurrenceListCreateView(APIView):
+    def get(self, request):
+        items = request.user.recurring_transactions.select_related(
+            "account", "category"
+        ).order_by("day_of_month", "description")
+        return Response(RecurringTransactionSerializer(items, many=True).data)
+
+    def post(self, request):
+        kind = str(request.data.get("kind", "")).upper()
+        if kind not in {TransactionKind.EXPENSE, TransactionKind.INCOME}:
+            return Response({"kind": ["Invalid kind."]}, status=400)
+        try:
+            amount = Decimal(str(request.data.get("amount")))
+            day = int(request.data.get("day_of_month"))
+        except Exception:
+            return Response({"detail": "Invalid amount or day."}, status=400)
+        if amount <= 0 or day < 1 or day > 28:
+            return Response({"detail": "Amount must be positive and day between 1 and 28."}, status=400)
+        description = str(request.data.get("description", "")).strip()
+        if not description:
+            return Response({"description": ["This field is required."]}, status=400)
+        item = create_recurrence(
+            user=request.user, kind=kind, amount=amount, description=description, day=day
+        )
+        return Response(RecurringTransactionSerializer(item).data, status=201)
+
+
+class RecurrenceDetailView(APIView):
+    def patch(self, request, recurrence_id):
+        item = request.user.recurring_transactions.filter(pk=recurrence_id).first()
+        if item is None:
+            return Response(status=404)
+        if "is_active" in request.data:
+            item.is_active = request.data["is_active"] in {True, "true", "True", "1", 1}
+            item.save(update_fields=["is_active", "updated_at"])
+        return Response(RecurringTransactionSerializer(item).data)
+
+    def delete(self, request, recurrence_id):
+        item = request.user.recurring_transactions.filter(pk=recurrence_id).first()
+        if item is None:
+            return Response(status=404)
+        item.delete()
         return Response(status=204)

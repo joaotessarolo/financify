@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import AccountDetailView, AccountListCreateView, BudgetDetailView, BudgetListCreateView, CategoryDetailView, CategoryListCreateView, DashboardSummaryView, TransactionDetailView, TransactionListView
+from .views import AccountDetailView, AccountListCreateView, BudgetDetailView, BudgetListCreateView, CategoryDetailView, CategoryListCreateView, DashboardSummaryView, RecurrenceDetailView, RecurrenceListCreateView, TransactionDetailView, TransactionListView
 
 app_name = "ledger"
 
@@ -14,4 +14,6 @@ urlpatterns = [
     path("categories/<uuid:category_id>/", CategoryDetailView.as_view(), name="category-detail"),
     path("budgets/", BudgetListCreateView.as_view(), name="budget-list"),
     path("budgets/<uuid:budget_id>/", BudgetDetailView.as_view(), name="budget-detail"),
+    path("recurrences/", RecurrenceListCreateView.as_view(), name="recurrence-list"),
+    path("recurrences/<uuid:recurrence_id>/", RecurrenceDetailView.as_view(), name="recurrence-detail"),
 ]

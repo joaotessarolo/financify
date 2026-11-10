@@ -115,3 +115,14 @@ class DashboardSummaryTests(APITestCase):
             ).status_code,
             status.HTTP_204_NO_CONTENT,
         )
+
+    def test_creates_pauses_and_removes_recurrence(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("ledger:recurrence-list"),
+            {"kind": "EXPENSE", "amount": "99.90", "description": "Internet", "day_of_month": 10},
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        url = reverse("ledger:recurrence-detail", args=[response.data["id"]])
+        self.assertFalse(self.client.patch(url, {"is_active": False}).data["is_active"])
+        self.assertEqual(self.client.delete(url).status_code, status.HTTP_204_NO_CONTENT)
