@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Account, AccountType
+from .models import Account, AccountSystemRole, AccountType, EntrySide, Transaction
 from .services import calculate_account_balance
 
 
@@ -53,3 +53,46 @@ class AccountUpdateSerializer(serializers.ModelSerializer):
         ).exists():
             raise serializers.ValidationError("An active account with this name already exists.")
         return value
+
+
+class TransactionSerializer(serializers.ModelSerializer):
+    amount = serializers.SerializerMethodField()
+    kind = serializers.SerializerMethodField()
+    category = serializers.CharField(source="category.name", allow_null=True)
+    accounts = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Transaction
+        fields = ("id", "description", "currency", "amount", "kind", "category", "accounts", "occurred_at", "status")
+
+    def _entries(self, transaction):
+        return list(transaction.entries.all())
+
+    def get_amount(self, transaction):
+        entries = self._entries(transaction)
+        preferred = next(
+            (
+                entry for entry in entries
+                if entry.account.system_role in {
+                    AccountSystemRole.GENERAL_EXPENSE,
+                    AccountSystemRole.GENERAL_INCOME,
+                }
+            ),
+            entries[0] if entries else None,
+        )
+        return preferred.amount if preferred else None
+
+    def get_kind(self, transaction):
+        entries = self._entries(transaction)
+        if any(entry.account.system_role == AccountSystemRole.GENERAL_EXPENSE for entry in entries):
+            return "EXPENSE"
+        if any(entry.account.system_role == AccountSystemRole.GENERAL_INCOME for entry in entries):
+            return "INCOME"
+        return "TRANSFER"
+
+    def get_accounts(self, transaction):
+        return [
+            {"id": str(entry.account_id), "name": entry.account.name, "side": entry.side}
+            for entry in self._entries(transaction)
+            if entry.account.account_type == AccountType.ASSET
+        ]

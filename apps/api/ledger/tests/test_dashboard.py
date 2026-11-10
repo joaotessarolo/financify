@@ -65,3 +65,10 @@ class DashboardSummaryTests(APITestCase):
         primary = self.user.accounts.get(system_role="PRIMARY")
         response = self.client.delete(reverse("ledger:account-detail", args=[primary.id]))
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_lists_posted_transactions_for_authenticated_user(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("ledger:transaction-list"))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, [])

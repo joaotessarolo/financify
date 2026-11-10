@@ -10,7 +10,7 @@ from rest_framework.views import APIView
 from .budgets import monthly_category_spend
 from .models import AccountSystemRole, AccountType, Budget, EntrySide, TransactionStatus
 from .services import calculate_account_balance
-from .serializers import AccountCreateSerializer, AccountSerializer, AccountUpdateSerializer
+from .serializers import AccountCreateSerializer, AccountSerializer, AccountUpdateSerializer, TransactionSerializer
 
 
 class DashboardSummaryView(APIView):
@@ -141,3 +141,13 @@ class AccountDetailView(APIView):
         account.is_active = False
         account.save(update_fields=["is_active", "updated_at"])
         return Response(status=204)
+
+
+class TransactionListView(APIView):
+    def get(self, request):
+        transactions = request.user.transactions.filter(
+            status=TransactionStatus.POSTED
+        ).select_related("category").prefetch_related("entries__account").order_by(
+            "-occurred_at", "-created_at"
+        )[:100]
+        return Response(TransactionSerializer(transactions, many=True).data)
