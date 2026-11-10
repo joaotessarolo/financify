@@ -23,6 +23,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="dashboard-shell">
+      <a className="skip-link" href="#main-content">Pular para o conteúdo</a>
       <aside className="sidebar">
         <Link className="brand" href="/" aria-label="Financify — início">
           <span className="brand-mark">F</span>
@@ -32,7 +33,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           {navigation.map((item) => {
             const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
             return (
-              <Link className={active ? "active" : ""} href={item.href} key={item.href}>
+              <Link className={active ? "active" : ""} href={item.href} key={item.href} aria-current={active ? "page" : undefined}>
                 <span aria-hidden="true">{item.icon}</span>
                 {item.label}
               </Link>
@@ -45,7 +46,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Button className="logout-button" variant="ghost" onClick={logout} aria-label="Sair">↪</Button>
         </div>
       </aside>
-      <div className="content">{children}</div>
+      <div className="content" id="main-content" tabIndex={-1}>{children}</div>
     </div>
   );
 }
