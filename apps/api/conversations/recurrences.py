@@ -57,6 +57,10 @@ def _next_date(*, day: int, reference: date) -> date:
     return date(year, month, day)
 
 
+def next_recurrence_date(*, day: int) -> date:
+    return _next_date(day=day, reference=timezone.localdate())
+
+
 def create_recurrence(*, user, kind: str, amount: Decimal, description: str, day: int):
     account = ensure_default_accounts(user=user).primary
     return RecurringTransaction.objects.create(
@@ -67,7 +71,7 @@ def create_recurrence(*, user, kind: str, amount: Decimal, description: str, day
         account=account,
         category=classify_category(user=user, description=description),
         day_of_month=day,
-        next_run_on=_next_date(day=day, reference=timezone.localdate()),
+        next_run_on=next_recurrence_date(day=day),
     )
 
 

@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { EmptyState, Field, PageHeader, Skeleton } from "./ui";
+import { Alert, EmptyState, Field, PageHeader, Skeleton } from "./ui";
 
 describe("shared interface components", () => {
   it("connects a field label to its input", () => {
@@ -19,5 +19,12 @@ describe("shared interface components", () => {
     render(<EmptyState title="Sem lançamentos" description="Registre o primeiro." />);
     expect(screen.getByText("Sem lançamentos")).toBeInTheDocument();
     expect(screen.getByText("Registre o primeiro.")).toBeInTheDocument();
+  });
+
+  it("announces errors and successful feedback", () => {
+    const { rerender } = render(<Alert>Falha ao salvar.</Alert>);
+    expect(screen.getByRole("alert")).toHaveTextContent("Falha ao salvar.");
+    rerender(<Alert tone="success">Salvo.</Alert>);
+    expect(screen.getByRole("status")).toHaveTextContent("Salvo.");
   });
 });

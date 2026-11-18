@@ -1,17 +1,22 @@
 const API_URL = "/backend";
 
 export class ApiError extends Error {
-  constructor(public readonly status: number, message = "API request failed") {
+  constructor(
+    public readonly status: number,
+    message = "API request failed",
+  ) {
     super(message);
   }
 }
 
 async function csrfToken(): Promise<string> {
   await fetch(`${API_URL}/api/v1/auth/csrf/`, { credentials: "include" });
-  return document.cookie
-    .split("; ")
-    .find((item) => item.startsWith("csrftoken="))
-    ?.split("=")[1] ?? "";
+  return (
+    document.cookie
+      .split("; ")
+      .find((item) => item.startsWith("csrftoken="))
+      ?.split("=")[1] ?? ""
+  );
 }
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -28,7 +33,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   if (!response.ok) {
     let message = `Request failed with status ${response.status}`;
     try {
-      const payload = await response.json() as { detail?: string };
+      const payload = (await response.json()) as { detail?: string };
       if (payload.detail) message = payload.detail;
     } catch {
       // Some endpoints intentionally return no JSON body.

@@ -5,7 +5,7 @@ transfers through a Telegram conversation and managing financial data through a
 web application.
 
 The repository is organized as a monorepo. The backend is a modular Django
-application, the web client will use Next.js, and Telegram provides the
+application, the web client uses Next.js, and Telegram provides the
 conversational interface for text and voice messages.
 
 ## Architecture

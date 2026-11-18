@@ -91,6 +91,28 @@ class DashboardSummaryTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
+    def test_voids_posted_transaction_without_deleting_audit_record(self):
+        from django.utils import timezone
+        from ledger.models import Transaction, TransactionStatus
+
+        transaction = Transaction.objects.create(
+            user=self.user,
+            description="Duplicated expense",
+            currency="BRL",
+            occurred_at=timezone.now(),
+            status=TransactionStatus.POSTED,
+            posted_at=timezone.now(),
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.delete(
+            reverse("ledger:transaction-detail", args=[transaction.id])
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        transaction.refresh_from_db()
+        self.assertEqual(transaction.status, TransactionStatus.VOIDED)
+
     def test_manages_categories_for_authenticated_user(self):
         self.client.force_login(self.user)
         created = self.client.post(reverse("ledger:category-list"), {"name": "Pets"})
@@ -125,5 +147,12 @@ class DashboardSummaryTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         url = reverse("ledger:recurrence-detail", args=[response.data["id"]])
+        edited = self.client.patch(
+            url,
+            {"description": "Fibra", "amount": "109.90", "day_of_month": 15},
+        )
+        self.assertEqual(edited.data["description"], "Fibra")
+        self.assertEqual(edited.data["amount"], "109.90")
+        self.assertEqual(edited.data["day_of_month"], 15)
         self.assertFalse(self.client.patch(url, {"is_active": False}).data["is_active"])
         self.assertEqual(self.client.delete(url).status_code, status.HTTP_204_NO_CONTENT)

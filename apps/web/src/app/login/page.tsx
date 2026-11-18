@@ -3,7 +3,7 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
-import { Button, Field } from "@/components/ui";
+import { Alert, Button, Field } from "@/components/ui";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -37,8 +37,14 @@ export default function LoginPage() {
         <p>Entre para acompanhar contas, gastos e metas em um só lugar.</p>
         <form onSubmit={submit}>
           <Field label="E-mail" name="email" type="email" autoComplete="email" required />
-          <Field label="Senha" name="password" type="password" autoComplete="current-password" required />
-          {error && <div className="error" role="alert">{error}</div>}
+          <Field
+            label="Senha"
+            name="password"
+            type="password"
+            autoComplete="current-password"
+            required
+          />
+          {error && <Alert>{error}</Alert>}
           <Button disabled={loading}>{loading ? "Entrando…" : "Entrar"}</Button>
         </form>
       </section>

@@ -155,3 +155,4 @@ class RecurringTransactionSerializer(serializers.ModelSerializer):
     class Meta:
         model = RecurringTransaction
         fields = ("id", "kind", "amount", "description", "account", "category", "day_of_month", "next_run_on", "is_active")
+        read_only_fields = ("id", "account", "category", "next_run_on")
