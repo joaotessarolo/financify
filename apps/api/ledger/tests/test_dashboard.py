@@ -125,5 +125,12 @@ class DashboardSummaryTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         url = reverse("ledger:recurrence-detail", args=[response.data["id"]])
+        edited = self.client.patch(
+            url,
+            {"description": "Fibra", "amount": "109.90", "day_of_month": 15},
+        )
+        self.assertEqual(edited.data["description"], "Fibra")
+        self.assertEqual(edited.data["amount"], "109.90")
+        self.assertEqual(edited.data["day_of_month"], 15)
         self.assertFalse(self.client.patch(url, {"is_active": False}).data["is_active"])
         self.assertEqual(self.client.delete(url).status_code, status.HTTP_204_NO_CONTENT)

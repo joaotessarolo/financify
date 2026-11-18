@@ -12,7 +12,7 @@ from .models import AccountSystemRole, AccountType, Budget, EntrySide, Transacti
 from .services import calculate_account_balance
 from .serializers import AccountCreateSerializer, AccountSerializer, AccountUpdateSerializer, BudgetSerializer, CategorySerializer, RecurringTransactionSerializer, TransactionSerializer, TransactionUpdateSerializer
 from conversations.extraction import TransactionKind
-from conversations.recurrences import create_recurrence
+from conversations.recurrences import create_recurrence, next_recurrence_date
 
 
 class DashboardSummaryView(APIView):
@@ -337,9 +337,12 @@ class RecurrenceDetailView(APIView):
         item = request.user.recurring_transactions.filter(pk=recurrence_id).first()
         if item is None:
             return Response(status=404)
-        if "is_active" in request.data:
-            item.is_active = request.data["is_active"] in {True, "true", "True", "1", 1}
-            item.save(update_fields=["is_active", "updated_at"])
+        serializer = RecurringTransactionSerializer(item, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        item = serializer.save()
+        if "day_of_month" in serializer.validated_data:
+            item.next_run_on = next_recurrence_date(day=item.day_of_month)
+            item.save(update_fields=["next_run_on", "updated_at"])
         return Response(RecurringTransactionSerializer(item).data)
 
     def delete(self, request, recurrence_id):
