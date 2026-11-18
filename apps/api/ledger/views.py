@@ -229,6 +229,14 @@ class TransactionDetailView(APIView):
         serializer.save()
         return Response(TransactionSerializer(transaction).data)
 
+    def delete(self, request, transaction_id):
+        transaction = self.get_transaction(request, transaction_id)
+        if transaction is None:
+            return Response(status=404)
+        transaction.status = TransactionStatus.VOIDED
+        transaction.save(update_fields=["status", "updated_at"])
+        return Response(status=204)
+
 
 class CategoryListCreateView(APIView):
     def get(self, request):

@@ -40,6 +40,17 @@ export default function TransactionDetailPage() {
     setSaved(true);
   }
 
+  async function voidTransaction() {
+    if (
+      !window.confirm(
+        "Anular esta transação? Ela sairá dos saldos, mas continuará no histórico de auditoria.",
+      )
+    )
+      return;
+    await apiFetch(`/api/v1/transactions/${id}/`, { method: "DELETE" });
+    router.replace("/transactions");
+  }
+
   if (!item) return <Skeleton />;
   return (
     <main>
@@ -66,6 +77,9 @@ export default function TransactionDetailPage() {
           />
           {saved && <Alert tone="success">Alterações salvas.</Alert>}
           <Button>Salvar alterações</Button>
+          <Button type="button" variant="danger" onClick={voidTransaction}>
+            Anular transação
+          </Button>
         </form>
       </Card>
     </main>
