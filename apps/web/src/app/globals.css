@@ -639,6 +639,21 @@ header {
 .budget-summary strong {
   font-size: 13px;
 }
+.budget-summary.budget-warning .progress i {
+  background: #c58a24;
+}
+.budget-summary.budget-exceeded .progress i {
+  background: var(--danger);
+}
+.budget-message {
+  display: block;
+  margin-top: 7px;
+  color: #785b12;
+  font-weight: 700;
+}
+.budget-exceeded .budget-message {
+  color: var(--danger);
+}
 @media (max-width: 850px) {
   .insight-grid {
     grid-template-columns: 1fr;

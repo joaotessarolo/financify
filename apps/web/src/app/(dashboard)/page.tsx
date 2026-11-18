@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { formatDate, formatMoney } from "@/lib/format";
+import { getBudgetProgress, getBudgetStatus } from "@/lib/budgets";
 import { Button, Card, EmptyState, PageHeader, Skeleton } from "@/components/ui";
 
 type Summary = {
@@ -145,9 +146,10 @@ export default function Dashboard() {
           <h2>Orçamentos do mês</h2>
           {summary.budgets.length ? (
             summary.budgets.map((budget) => {
-              const progress = Math.min((Number(budget.spent) / Number(budget.limit)) * 100, 100);
+              const progress = getBudgetProgress(budget.spent, budget.limit);
+              const status = getBudgetStatus(progress);
               return (
-                <div className="budget-summary" key={budget.category}>
+                <div className={`budget-summary budget-${status}`} key={budget.category}>
                   <div>
                     <span>{budget.category}</span>
                     <strong>
@@ -159,8 +161,15 @@ export default function Dashboard() {
                     className="progress"
                     aria-label={`${budget.category}: ${Math.round(progress)}% utilizado`}
                   >
-                    <i style={{ width: `${progress}%` }} />
+                    <i style={{ width: `${Math.min(progress, 100)}%` }} />
                   </div>
+                  {status !== "safe" && (
+                    <small className="budget-message">
+                      {status === "exceeded"
+                        ? "Limite ultrapassado"
+                        : "Você já usou mais de 80% deste orçamento"}
+                    </small>
+                  )}
                 </div>
               );
             })
