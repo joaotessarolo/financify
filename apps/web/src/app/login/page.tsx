@@ -3,7 +3,7 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
-import { Button, Field } from "@/components/ui";
+import { Alert, Button, Field } from "@/components/ui";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -44,11 +44,7 @@ export default function LoginPage() {
             autoComplete="current-password"
             required
           />
-          {error && (
-            <div className="error" role="alert">
-              {error}
-            </div>
-          )}
+          {error && <Alert>{error}</Alert>}
           <Button disabled={loading}>{loading ? "Entrando…" : "Entrar"}</Button>
         </form>
       </section>

@@ -77,3 +77,17 @@ export function Skeleton({ lines = 3 }: { lines?: number }) {
     </div>
   );
 }
+
+export function Alert({
+  children,
+  tone = "error",
+}: {
+  children: ReactNode;
+  tone?: "error" | "success" | "warning";
+}) {
+  return (
+    <div className={`alert alert-${tone}`} role={tone === "error" ? "alert" : "status"}>
+      {children}
+    </div>
+  );
+}

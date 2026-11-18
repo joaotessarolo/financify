@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
-import { Button, Card, Field, PageHeader, Skeleton } from "@/components/ui";
+import { Alert, Button, Card, Field, PageHeader, Skeleton } from "@/components/ui";
 
 type Transaction = {
   id: string;
@@ -64,7 +64,7 @@ export default function TransactionDetailPage() {
             defaultValue={item.occurred_at.slice(0, 10)}
             required
           />
-          {saved && <p className="success">Alterações salvas.</p>}
+          {saved && <Alert tone="success">Alterações salvas.</Alert>}
           <Button>Salvar alterações</Button>
         </form>
       </Card>

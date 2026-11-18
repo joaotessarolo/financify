@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
-import { Button, Card, EmptyState, Field, PageHeader, Skeleton } from "@/components/ui";
+import { Alert, Button, Card, EmptyState, Field, PageHeader, Skeleton } from "@/components/ui";
 
 type Account = { id: string; name: string; currency: string; balance: string; is_primary: boolean };
 
@@ -80,11 +80,7 @@ export default function AccountsPage() {
                 required
               />
             )}
-            {error && (
-              <div className="error" role="alert">
-                {error}
-              </div>
-            )}
+            {error && <Alert>{error}</Alert>}
             <Button>Salvar conta</Button>
           </form>
         </Card>

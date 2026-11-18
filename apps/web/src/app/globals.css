@@ -130,11 +130,24 @@ select {
   color: var(--ink);
   font: inherit;
 }
-.error {
+.error,
+.alert-error {
   padding: 10px 12px;
   color: var(--danger);
   background: #fff1f1;
   border-radius: 10px;
+}
+.alert {
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+.alert-success {
+  color: #17653b;
+  background: #e8f6ed;
+}
+.alert-warning {
+  color: #785b12;
+  background: #fff7d6;
 }
 .dashboard-shell {
   min-height: 100vh;
