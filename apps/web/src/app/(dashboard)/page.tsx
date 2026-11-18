@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { apiFetch } from "@/lib/api";
-import { formatMoney } from "@/lib/format";
+import { formatDate, formatMoney } from "@/lib/format";
 import { Button, Card, EmptyState, PageHeader, Skeleton } from "@/components/ui";
 
 type Summary = {
@@ -171,6 +172,30 @@ export default function Dashboard() {
           )}
         </Card>
       </div>
+      <Card className="panel upcoming-panel">
+        <div className="panel-heading">
+          <h2>Próximos lançamentos recorrentes</h2>
+          <Link href="/planning">Ver planejamento</Link>
+        </div>
+        {summary.upcoming_recurrences.length ? (
+          <div className="upcoming-grid">
+            {summary.upcoming_recurrences.map((item) => (
+              <div className="upcoming-item" key={item.id}>
+                <span>
+                  {item.description}
+                  <small>{formatDate(`${item.next_run_on}T12:00:00`)}</small>
+                </span>
+                <strong>{formatMoney(item.amount, summary.currency)}</strong>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            title="Nenhuma recorrência próxima"
+            description="Crie despesas ou receitas recorrentes no planejamento."
+          />
+        )}
+      </Card>
     </main>
   );
 }
