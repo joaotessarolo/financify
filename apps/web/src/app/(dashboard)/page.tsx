@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { formatMoney } from "@/lib/format";
 import { Button, Card, EmptyState, PageHeader, Skeleton } from "@/components/ui";
 
 type Summary = {
@@ -26,9 +27,6 @@ type Summary = {
     next_run_on: string;
   }>;
 };
-
-const money = (value: string, currency: string) =>
-  new Intl.NumberFormat("pt-BR", { style: "currency", currency }).format(Number(value));
 
 export default function Dashboard() {
   const router = useRouter();
@@ -69,21 +67,25 @@ export default function Dashboard() {
       />
       <div className="hero-card">
         <span>Saldo total</span>
-        <strong>{money(summary.total_balance, summary.currency)}</strong>
+        <strong>{formatMoney(summary.total_balance, summary.currency)}</strong>
         <small>{summary.accounts.length} conta(s) ativa(s)</small>
       </div>
       <div className="stat-grid">
         <Card>
           <span>Receitas</span>
-          <strong className="positive">{money(summary.month.income, summary.currency)}</strong>
+          <strong className="positive">
+            {formatMoney(summary.month.income, summary.currency)}
+          </strong>
         </Card>
         <Card>
           <span>Despesas</span>
-          <strong className="negative">{money(summary.month.expenses, summary.currency)}</strong>
+          <strong className="negative">
+            {formatMoney(summary.month.expenses, summary.currency)}
+          </strong>
         </Card>
         <Card>
           <span>Resultado</span>
-          <strong>{money(summary.month.net, summary.currency)}</strong>
+          <strong>{formatMoney(summary.month.net, summary.currency)}</strong>
         </Card>
       </div>
       <div className="panel-grid">
@@ -92,7 +94,7 @@ export default function Dashboard() {
           {summary.accounts.map((account) => (
             <div className="row" key={account.id}>
               <span>{account.name}</span>
-              <strong>{money(account.balance, summary.currency)}</strong>
+              <strong>{formatMoney(account.balance, summary.currency)}</strong>
             </div>
           ))}
         </Card>
@@ -105,7 +107,7 @@ export default function Dashboard() {
                   {item.description}
                   <small>{item.category ?? "Sem categoria"}</small>
                 </span>
-                <strong>{money(item.amount, summary.currency)}</strong>
+                <strong>{formatMoney(item.amount, summary.currency)}</strong>
               </div>
             ))
           ) : (
@@ -127,7 +129,7 @@ export default function Dashboard() {
                   <div>
                     <i style={{ width: `${(Number(item.amount) / largestCategory) * 100}%` }} />
                   </div>
-                  <strong>{money(item.amount, summary.currency)}</strong>
+                  <strong>{formatMoney(item.amount, summary.currency)}</strong>
                 </div>
               ))}
             </div>
@@ -148,8 +150,8 @@ export default function Dashboard() {
                   <div>
                     <span>{budget.category}</span>
                     <strong>
-                      {money(budget.spent, summary.currency)} de{" "}
-                      {money(budget.limit, summary.currency)}
+                      {formatMoney(budget.spent, summary.currency)} de{" "}
+                      {formatMoney(budget.limit, summary.currency)}
                     </strong>
                   </div>
                   <div

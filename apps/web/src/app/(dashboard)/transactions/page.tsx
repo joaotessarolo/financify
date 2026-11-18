@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
+import { formatDate, formatMoney } from "@/lib/format";
 import { Button, Card, EmptyState, Field, PageHeader, Skeleton } from "@/components/ui";
 
 type Transaction = {
@@ -24,11 +25,6 @@ export default function TransactionsPage() {
     apiFetch<Transaction[]>("/api/v1/transactions/").then(setItems);
     apiFetch<Account[]>("/api/v1/accounts/").then(setAccounts);
   }, []);
-  const money = (item: Transaction) =>
-    new Intl.NumberFormat("pt-BR", { style: "currency", currency: item.currency }).format(
-      Number(item.amount),
-    );
-
   function filter(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
@@ -93,8 +89,7 @@ export default function TransactionsPage() {
               <span>
                 <strong>{item.description}</strong>
                 <small>
-                  {item.category ?? "Transferência"} ·{" "}
-                  {new Date(item.occurred_at).toLocaleDateString("pt-BR")}
+                  {item.category ?? "Transferência"} · {formatDate(item.occurred_at)}
                 </small>
               </span>
               <span className="transaction-account">
@@ -106,7 +101,7 @@ export default function TransactionsPage() {
                 }
               >
                 {item.kind === "EXPENSE" ? "−" : item.kind === "INCOME" ? "+" : ""}
-                {money(item)}
+                {formatMoney(item.amount, item.currency)}
               </strong>
             </Link>
           ))}

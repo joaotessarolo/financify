@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { formatMoney } from "@/lib/format";
 import { Button, Card, Field, PageHeader, Skeleton } from "@/components/ui";
 
 type Transaction = {
@@ -53,11 +54,7 @@ export default function TransactionDetailPage() {
         }
       />
       <Card className="detail-card">
-        <strong className="detail-amount">
-          {new Intl.NumberFormat("pt-BR", { style: "currency", currency: item.currency }).format(
-            Number(item.amount),
-          )}
-        </strong>
+        <strong className="detail-amount">{formatMoney(item.amount, item.currency)}</strong>
         <form onSubmit={submit}>
           <Field label="Descrição" name="description" defaultValue={item.description} required />
           <Field

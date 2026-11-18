@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { formatDate } from "@/lib/format";
 import { Button, Card, EmptyState, Field, PageHeader, Skeleton } from "@/components/ui";
 
 type Budget = {
@@ -202,7 +203,7 @@ export default function PlanningPage() {
                   <strong>{item.description}</strong>
                   <small>
                     Todo dia {item.day_of_month} · próxima em{" "}
-                    {new Date(`${item.next_run_on}T12:00:00`).toLocaleDateString("pt-BR")}
+                    {formatDate(`${item.next_run_on}T12:00:00`)}
                   </small>
                 </span>
                 <strong>R$ {Number(item.amount).toLocaleString("pt-BR")}</strong>

@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { formatMoney } from "@/lib/format";
 import { Button, Card, EmptyState, Field, PageHeader, Skeleton } from "@/components/ui";
 
 type Account = { id: string; name: string; currency: string; balance: string; is_primary: boolean };
@@ -14,8 +15,6 @@ export default function AccountsPage() {
   useEffect(() => {
     load();
   }, [load]);
-  const format = (value: string, currency: string) =>
-    new Intl.NumberFormat("pt-BR", { style: "currency", currency }).format(Number(value));
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -107,7 +106,7 @@ export default function AccountsPage() {
               </div>
               <h2>{account.name}</h2>
               <span>Saldo atual</span>
-              <strong>{format(account.balance, account.currency)}</strong>
+              <strong>{formatMoney(account.balance, account.currency)}</strong>
               <div className="card-actions">
                 <Button variant="ghost" onClick={() => setEditing(account)}>
                   Renomear

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { formatDate } from "@/lib/format";
 import { Button, Card, PageHeader, Skeleton } from "@/components/ui";
 import { useSession } from "@/components/session-provider";
 
@@ -64,7 +65,7 @@ export default function SettingsPage() {
           ) : telegram.connected ? (
             <>
               <p className="status-connected">
-                ● Conectado desde {new Date(telegram.linked_at!).toLocaleDateString("pt-BR")}
+                ● Conectado desde {formatDate(telegram.linked_at!)}
               </p>
               <Button variant="danger" onClick={disconnect}>
                 Desconectar
