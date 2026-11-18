@@ -336,7 +336,6 @@ class UserProfileViewTests(APITestCase):
         self.user.refresh_from_db()
         self.assertEqual(self.user.email, "user@example.com")
         self.assertEqual(response.data["email"], "user@example.com")
-
     def test_patch_ignores_is_staff_and_is_superuser_modification(self):
         self.client.force_login(self.user)
 
@@ -411,3 +410,36 @@ class UserProfileViewTests(APITestCase):
         self.assertEqual(response.data["timezone"][0].code, "invalid_timezone")
         self.user.refresh_from_db()
         self.assertEqual(self.user.timezone, "America/Sao_Paulo")
+
+
+class PasswordChangeViewTests(APITestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            email="password@example.com", password="OldPassword!123"
+        )
+        self.url = reverse("users:password")
+        self.client.force_login(self.user)
+
+    def test_changes_password_with_current_password(self):
+        response = self.client.post(
+            self.url,
+            {
+                "current_password": "OldPassword!123",
+                "new_password": "NewPassword!456",
+                "new_password_confirmation": "NewPassword!456",
+            },
+        )
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("NewPassword!456"))
+
+    def test_rejects_incorrect_current_password(self):
+        response = self.client.post(
+            self.url,
+            {
+                "current_password": "WrongPassword!123",
+                "new_password": "NewPassword!456",
+                "new_password_confirmation": "NewPassword!456",
+            },
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

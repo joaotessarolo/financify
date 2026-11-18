@@ -14,6 +14,7 @@ export default function SettingsPage() {
   const [telegram, setTelegram] = useState<TelegramStatus | null>(null);
   const [link, setLink] = useState<TelegramLink | null>(null);
   const [profileSaved, setProfileSaved] = useState(false);
+  const [passwordFeedback, setPasswordFeedback] = useState<"saved" | "error" | null>(null);
   const load = useCallback(
     () => apiFetch<TelegramStatus>("/api/v1/telegram/link/").then(setTelegram),
     [],
@@ -44,6 +45,26 @@ export default function SettingsPage() {
     });
     await refresh();
     setProfileSaved(true);
+  }
+  async function changePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    setPasswordFeedback(null);
+    try {
+      await apiFetch("/api/v1/users/password/", {
+        method: "POST",
+        body: JSON.stringify({
+          current_password: data.get("current_password"),
+          new_password: data.get("new_password"),
+          new_password_confirmation: data.get("new_password_confirmation"),
+        }),
+      });
+      form.reset();
+      setPasswordFeedback("saved");
+    } catch {
+      setPasswordFeedback("error");
+    }
   }
 
   return (
@@ -84,6 +105,23 @@ export default function SettingsPage() {
               <Button>Salvar perfil</Button>
             </form>
           )}
+        </Card>
+        <Card>
+          <h2>Segurança</h2>
+          <form className="settings-form" onSubmit={changePassword}>
+            <Field label="Senha atual" name="current_password" type="password" required />
+            <Field label="Nova senha" name="new_password" type="password" minLength={8} required />
+            <Field
+              label="Confirmar nova senha"
+              name="new_password_confirmation"
+              type="password"
+              minLength={8}
+              required
+            />
+            {passwordFeedback === "saved" && <Alert tone="success">Senha alterada.</Alert>}
+            {passwordFeedback === "error" && <Alert>Confira a senha atual e a confirmação.</Alert>}
+            <Button>Alterar senha</Button>
+          </form>
         </Card>
         <Card>
           <div className="integration-head">

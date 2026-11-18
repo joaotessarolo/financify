@@ -100,3 +100,22 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "id",
             "email",
         )
+
+
+class PasswordChangeSerializer(serializers.Serializer):
+    current_password = serializers.CharField(write_only=True, trim_whitespace=False)
+    new_password = serializers.CharField(write_only=True, trim_whitespace=False)
+    new_password_confirmation = serializers.CharField(write_only=True, trim_whitespace=False)
+
+    def validate_current_password(self, value):
+        if not self.context["request"].user.check_password(value):
+            raise serializers.ValidationError("Current password is incorrect.")
+        return value
+
+    def validate(self, attrs):
+        if attrs["new_password"] != attrs["new_password_confirmation"]:
+            raise serializers.ValidationError(
+                {"new_password_confirmation": "Passwords do not match."}
+            )
+        validate_password(attrs["new_password"], self.context["request"].user)
+        return attrs
