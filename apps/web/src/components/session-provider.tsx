@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { ApiError, apiFetch } from "@/lib/api";
 
@@ -12,7 +12,12 @@ type User = {
   currency: string;
   timezone: string;
 };
-type Session = { user: User | null; loading: boolean; logout: () => Promise<void> };
+type Session = {
+  user: User | null;
+  loading: boolean;
+  logout: () => Promise<void>;
+  refresh: () => Promise<void>;
+};
 
 const SessionContext = createContext<Session | null>(null);
 
@@ -20,6 +25,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const refresh = useCallback(async () => {
+    setUser(await apiFetch<User>("/api/v1/users/me/"));
+  }, []);
 
   useEffect(() => {
     apiFetch<User>("/api/v1/users/me/")
@@ -42,7 +50,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <SessionContext.Provider value={{ user, loading, logout }}>{children}</SessionContext.Provider>
+    <SessionContext.Provider value={{ user, loading, logout, refresh }}>
+      {children}
+    </SessionContext.Provider>
   );
 }
 

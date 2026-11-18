@@ -426,6 +426,19 @@ header {
 .settings-grid h2 {
   margin-top: 0;
 }
+.settings-form {
+  margin-top: 18px;
+}
+.name-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 520px) {
+  .name-fields {
+    grid-template-columns: 1fr;
+  }
+}
 .definition-list {
   display: grid;
   gap: 14px;

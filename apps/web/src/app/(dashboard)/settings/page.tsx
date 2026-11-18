@@ -1,18 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/format";
-import { Button, Card, PageHeader, Skeleton } from "@/components/ui";
+import { Alert, Button, Card, Field, PageHeader, Skeleton } from "@/components/ui";
 import { useSession } from "@/components/session-provider";
 
 type TelegramStatus = { connected: boolean; linked_at: string | null };
 type TelegramLink = { url: string; expires_at: string };
 
 export default function SettingsPage() {
-  const { user } = useSession();
+  const { user, refresh } = useSession();
   const [telegram, setTelegram] = useState<TelegramStatus | null>(null);
   const [link, setLink] = useState<TelegramLink | null>(null);
+  const [profileSaved, setProfileSaved] = useState(false);
   const load = useCallback(
     () => apiFetch<TelegramStatus>("/api/v1/telegram/link/").then(setTelegram),
     [],
@@ -29,6 +30,21 @@ export default function SettingsPage() {
     setLink(null);
     await load();
   }
+  async function saveProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    await apiFetch("/api/v1/users/me/", {
+      method: "PATCH",
+      body: JSON.stringify({
+        first_name: data.get("first_name"),
+        last_name: data.get("last_name"),
+        currency: data.get("currency"),
+        timezone: data.get("timezone"),
+      }),
+    });
+    await refresh();
+    setProfileSaved(true);
+  }
 
   return (
     <main>
@@ -40,17 +56,34 @@ export default function SettingsPage() {
       <div className="settings-grid">
         <Card>
           <h2>Seu perfil</h2>
-          <div className="definition-list">
-            <span>
-              E-mail<strong>{user?.email ?? "—"}</strong>
-            </span>
-            <span>
-              Moeda<strong>{user?.currency ?? "—"}</strong>
-            </span>
-            <span>
-              Fuso horário<strong>{user?.timezone ?? "—"}</strong>
-            </span>
-          </div>
+          <p className="empty">{user?.email ?? "—"}</p>
+          {user && (
+            <form className="settings-form" onSubmit={saveProfile}>
+              <div className="name-fields">
+                <Field label="Nome" name="first_name" defaultValue={user.first_name} />
+                <Field label="Sobrenome" name="last_name" defaultValue={user.last_name} />
+              </div>
+              <label className="field">
+                <span>Moeda</span>
+                <select name="currency" defaultValue={user.currency}>
+                  <option value="BRL">BRL — Real</option>
+                  <option value="USD">USD — Dólar</option>
+                  <option value="EUR">EUR — Euro</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Fuso horário</span>
+                <select name="timezone" defaultValue={user.timezone}>
+                  <option value="America/Sao_Paulo">São Paulo</option>
+                  <option value="UTC">UTC</option>
+                  <option value="America/New_York">Nova York</option>
+                  <option value="Europe/Lisbon">Lisboa</option>
+                </select>
+              </label>
+              {profileSaved && <Alert tone="success">Perfil atualizado.</Alert>}
+              <Button>Salvar perfil</Button>
+            </form>
+          )}
         </Card>
         <Card>
           <div className="integration-head">
