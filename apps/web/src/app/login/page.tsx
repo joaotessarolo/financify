@@ -37,8 +37,18 @@ export default function LoginPage() {
         <p>Entre para acompanhar contas, gastos e metas em um só lugar.</p>
         <form onSubmit={submit}>
           <Field label="E-mail" name="email" type="email" autoComplete="email" required />
-          <Field label="Senha" name="password" type="password" autoComplete="current-password" required />
-          {error && <div className="error" role="alert">{error}</div>}
+          <Field
+            label="Senha"
+            name="password"
+            type="password"
+            autoComplete="current-password"
+            required
+          />
+          {error && (
+            <div className="error" role="alert">
+              {error}
+            </div>
+          )}
           <Button disabled={loading}>{loading ? "Entrando…" : "Entrar"}</Button>
         </form>
       </section>
